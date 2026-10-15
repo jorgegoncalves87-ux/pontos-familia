@@ -1,0 +1,13 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Cada família só vê e altera os seus próprios dados.
+    match /families/{familyId} {
+      allow read, write: if request.auth != null && request.auth.uid == familyId;
+
+      match /{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == familyId;
+      }
+    }
+  }
+}
