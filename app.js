@@ -522,6 +522,7 @@ async function approveEntry(entryId, pointsOverride = null) {
     if (!k.exists()) throw new Error("Este filho já não existe.");
     const cur = k.data().points || 0;
     // Nos extras sugeridos pelos filhos, os pontos são os que o pai/mãe decide ao aprovar.
+    if (entry.type === "extra" && pointsOverride == null) throw new Error("Usa \"Dar pontos\" para decidir quantos pontos vale.");
     const points = pointsOverride ?? entry.points;
     if (entry.type === "reward" && cur < Math.abs(points)) throw new Error("Saldo insuficiente para esta recompensa.");
     const next = Math.max(0, cur + points);
@@ -980,6 +981,27 @@ function pointsForm(kidId, sign) {
     toast(sign < 0 ? "Penalização registada." : "Bónus atribuído!");
   }, sign < 0 ? "Retirar pontos" : "Dar pontos");
 }
+
+// ---------- Atualizações ----------
+// Os telemóveis guardam a app em cache; ao abrir (e ao voltar à app) comparamos com version.json
+// e, se houver versão nova, recarregamos os ficheiros. Atualiza APP_VERSION e version.json juntos.
+const APP_VERSION = "2026-10-16.2";
+async function checkForUpdate() {
+  try {
+    if (!modal.classList.contains("hidden")) return; // não interromper quem está a escrever
+    const res = await fetch(`version.json?t=${Date.now()}`, { cache: "no-store" });
+    const { version } = await res.json();
+    if (!version || version === APP_VERSION) return;
+    // Evita ciclos se o servidor ainda estiver a servir a versão antiga.
+    if (sessionStorage.getItem("pf-updated-to") === version) return;
+    sessionStorage.setItem("pf-updated-to", version);
+    await Promise.all(["./", "index.html", "app.js", "style.css", "firebase-config.js", "sw.js", "manifest.webmanifest"]
+      .map((u) => fetch(u, { cache: "reload" }).catch(() => {})));
+    location.reload();
+  } catch { /* sem rede: tenta da próxima vez */ }
+}
+setTimeout(checkForUpdate, 1500);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkForUpdate(); });
 
 const PHOTO_SIZE = 192;
 
