@@ -192,3 +192,14 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-weight:
 .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .sw.gain { background: var(--gain); }
 .sw.loss { background: var(--loss); }
+
+/* Fotos dos filhos */
+.avatar { border-radius: 50%; object-fit: cover; display: inline-block; vertical-align: middle; flex: none; }
+.avatar-emoji { display: inline-block; text-align: center; line-height: 1; flex: none; }
+.avatar.xs { width: 22px; height: 22px; } .avatar-emoji.xs { font-size: 1.1rem; }
+.avatar.sm { width: 32px; height: 32px; } .avatar-emoji.sm { font-size: 1.5rem; }
+.avatar.md { width: 48px; height: 48px; } .avatar-emoji.md { font-size: 2rem; }
+.avatar.lg { width: 84px; height: 84px; } .avatar-emoji.lg { font-size: 2.6rem; }
+.profile .emoji .avatar.lg { box-shadow: 0 0 0 3px var(--card), 0 0 0 5px var(--primary); }
+h1.row, h2.row { gap: 10px; }
+.photo-edit { width: 120px; height: 120px; border-radius: 50%; touch-action: none; cursor: grab; border: 2px solid var(--border); }

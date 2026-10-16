@@ -81,6 +81,11 @@ const backDays = () => Math.min(MAX_BACK_DAYS, Math.max(0, S.fam?.maxBackDays ??
 const ptsHtml = (n) => `<span class="pts ${n >= 0 ? "plus" : "minus"}">${n > 0 ? "+" : ""}${n}</span>`;
 const kidById = (id) => S.kids.find((k) => k.id === id);
 const kidName = (id) => { const k = kidById(id); return k ? `${k.emoji} ${k.name}` : "?"; };
+const PHOTO_RE = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/;
+/** Foto do filho (se houver) ou o emoji. */
+const avatar = (k, cls = "") => (k.photo && PHOTO_RE.test(k.photo)
+  ? `<img class="avatar ${cls}" src="${k.photo}" alt="">`
+  : `<span class="avatar-emoji ${cls}">${esc(k.emoji)}</span>`);
 const STATUS_LABEL = { pending: "Por validar", approved: "Aprovado", rejected: "Rejeitado" };
 const statusPill = (s) => `<span class="pill ${s}">${STATUS_LABEL[s]}</span>`;
 
@@ -355,7 +360,7 @@ function renderSetup() {
 function renderProfiles() {
   app.innerHTML = `<div class="header"><h1>Quem és tu?</h1><button class="link" id="logout">${isDevice() ? "Desligar" : "Sair"}</button></div>
     <div class="profiles">
-      ${S.kids.map((k) => `<button class="profile" data-kid="${k.id}"><span class="emoji">${esc(k.emoji)}</span>${esc(k.name)}</button>`).join("")}
+      ${S.kids.map((k) => `<button class="profile" data-kid="${k.id}"><span class="emoji">${avatar(k, "lg")}</span>${esc(k.name)}</button>`).join("")}
       <button class="profile" data-parent><span class="emoji">🔐</span>Pai / Mãe</button>
     </div>
     ${S.kids.length ? "" : `<p class="muted" style="margin-top:16px">Ainda não há filhos. Entra como pai/mãe para os adicionar.</p>`}`;
@@ -567,7 +572,7 @@ function renderKid(kid) {
   }
   const pending = S.log.filter((e) => e.kidId === kid.id && e.type === "task" && e.status === "pending")
     .reduce((s, e) => s + e.points, 0);
-  app.innerHTML = `<div class="header"><h1>${esc(kid.emoji)} ${esc(kid.name)}</h1><button class="link" id="switch">Trocar</button></div>
+  app.innerHTML = `<div class="header"><h1 class="row">${avatar(kid, "md")} ${esc(kid.name)}</h1><button class="link" id="switch">Trocar</button></div>
     <div class="balance"><div class="big">⭐ ${kid.points || 0}</div><div>pontos${pending ? ` · +${pending} por validar` : ""}</div></div>
     ${body}${nav}`;
   document.getElementById("switch").onclick = () => setRole(null);
@@ -707,7 +712,7 @@ function parentValidate() {
     const items = pending.filter((e) => e.kidId === kid.id).sort((a, b) => a.date.localeCompare(b.date));
     if (!items.length) continue;
     const taskCount = items.filter((e) => e.type === "task").length;
-    html += `<div class="row spread"><h2>${esc(kid.emoji)} ${esc(kid.name)} <span class="muted small">· saldo ${kid.points || 0}</span></h2>
+    html += `<div class="row spread"><h2 class="row">${avatar(kid, "sm")} ${esc(kid.name)} <span class="muted small">· saldo ${kid.points || 0}</span></h2>
       ${taskCount > 1 ? `<button class="good" data-approve-all="${kid.id}">Aprovar tarefas (${taskCount})</button>` : ""}</div>`;
     html += items.map((e) => `<div class="card row wrap">
       <div style="font-size:1.3rem">${e.type === "reward" ? "🎁" : "✅"}</div>
@@ -727,7 +732,7 @@ function parentValidate() {
 
 function parentKids() {
   return (S.kids.length ? S.kids.map((k) => `<div class="card">
-      <div class="row"><div style="font-size:2rem">${esc(k.emoji)}</div>
+      <div class="row">${avatar(k, "md")}
         <div class="grow"><h3>${esc(k.name)}</h3><div class="muted small">${pendingRewardCost(k.id) ? `${pendingRewardCost(k.id)} pts em pedidos de prémio` : ""}</div></div>
         <div class="pts" style="font-size:1.4rem">⭐ ${k.points || 0}</div></div>
       ${weekChart(k)}
@@ -808,11 +813,101 @@ function pointsForm(kidId, sign) {
   }, sign < 0 ? "Retirar pontos" : "Dar pontos");
 }
 
+const PHOTO_SIZE = 192;
+
+/**
+ * Recorte quadrado da foto: arrastar para mover, barra para aproximar.
+ * Fica guardada como JPEG pequeno (~15 KB) nos dados da família — nunca no repositório público.
+ */
+function photoEditor(form, initial) {
+  const canvas = form.querySelector("#photoCanvas"), ctx = canvas.getContext("2d");
+  const zoomEl = form.querySelector("#photoZoom"), zoomBox = form.querySelector("#photoZoomBox");
+  const removeBtn = form.querySelector("#photoRemove");
+  const st = { img: null, zoom: 1, x: 0, y: 0, changed: false, removed: false };
+  const draw = () => {
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, PHOTO_SIZE, PHOTO_SIZE);
+    if (!st.img) return;
+    const base = PHOTO_SIZE / Math.min(st.img.width, st.img.height);
+    const w = st.img.width * base * st.zoom, h = st.img.height * base * st.zoom;
+    // Não deixa aparecer fundo vazio à volta da foto.
+    st.x = Math.min(0, Math.max(PHOTO_SIZE - w, st.x));
+    st.y = Math.min(0, Math.max(PHOTO_SIZE - h, st.y));
+    ctx.drawImage(st.img, st.x, st.y, w, h);
+  };
+  const show = (on) => {
+    canvas.classList.toggle("hidden", !on);
+    removeBtn.classList.toggle("hidden", !on);
+  };
+  const load = (src, editable) => {
+    const img = new Image();
+    img.onload = () => {
+      st.img = img;
+      st.zoom = 1;
+      const base = PHOTO_SIZE / Math.min(img.width, img.height);
+      st.x = (PHOTO_SIZE - img.width * base) / 2;
+      st.y = (PHOTO_SIZE - img.height * base) / 2;
+      zoomEl.value = 1;
+      zoomBox.classList.toggle("hidden", !editable);
+      show(true);
+      draw();
+    };
+    img.src = src;
+  };
+  if (initial) load(initial, false);
+  form.querySelector("#photoFile").onchange = (ev) => {
+    const file = ev.target.files[0];
+    if (!file) return;
+    st.changed = true; st.removed = false;
+    load(URL.createObjectURL(file), true);
+  };
+  zoomEl.oninput = () => {
+    // Aproxima a partir do centro do recorte.
+    const c = PHOTO_SIZE / 2, k = Number(zoomEl.value) / st.zoom;
+    st.x = c - (c - st.x) * k; st.y = c - (c - st.y) * k;
+    st.zoom = Number(zoomEl.value);
+    draw();
+  };
+  let drag = null;
+  canvas.onpointerdown = (e) => {
+    if (zoomBox.classList.contains("hidden")) return;
+    drag = { x: e.clientX, y: e.clientY };
+    canvas.setPointerCapture(e.pointerId);
+  };
+  canvas.onpointermove = (e) => {
+    if (!drag) return;
+    const scale = PHOTO_SIZE / canvas.getBoundingClientRect().width;
+    st.x += (e.clientX - drag.x) * scale; st.y += (e.clientY - drag.y) * scale;
+    drag = { x: e.clientX, y: e.clientY };
+    draw();
+  };
+  canvas.onpointerup = canvas.onpointercancel = () => (drag = null);
+  removeBtn.onclick = () => {
+    st.img = null; st.changed = true; st.removed = true;
+    zoomBox.classList.add("hidden");
+    show(false);
+  };
+  return {
+    get changed() { return st.changed; },
+    dataUrl: () => (st.removed || !st.img ? null : canvas.toDataURL("image/jpeg", 0.82)),
+  };
+}
+
 function kidForm(kid) {
   const emoji = kid?.emoji || EMOJIS[S.kids.length % EMOJIS.length];
   const form = openForm(kid ? `Editar ${kid.name}` : "Novo filho", `
     <label>Nome</label><input name="name" required maxlength="30" value="${esc(kid?.name || "")}">
-    <label>Avatar</label><select name="emoji">${EMOJIS.map((e) => `<option ${e === emoji ? "selected" : ""}>${e}</option>`).join("")}</select>
+    <label>Foto</label>
+    <div class="row wrap">
+      <canvas id="photoCanvas" width="${PHOTO_SIZE}" height="${PHOTO_SIZE}" class="photo-edit hidden"></canvas>
+      <div class="grow">
+        <label class="btn" style="display:inline-block;margin:0;font-weight:400">📷 Escolher foto<input type="file" accept="image/*" id="photoFile" hidden></label>
+        <button type="button" class="link hidden" id="photoRemove">Remover foto</button>
+        <div id="photoZoomBox" class="hidden"><p class="small muted" style="margin:8px 0 2px">Arrasta para centrar a cara; usa a barra para aproximar.</p>
+          <input type="range" id="photoZoom" min="1" max="4" step="0.01" value="1"></div>
+      </div>
+    </div>
+    <label>Emoji (quando não há foto)</label><select name="emoji">${EMOJIS.map((e) => `<option ${e === emoji ? "selected" : ""}>${e}</option>`).join("")}</select>
     <label>${kid ? "Novo PIN (deixa vazio para manter)" : "PIN (4 a 6 dígitos)"}</label>
     <input name="pin" type="password" inputmode="numeric" maxlength="6" ${kid ? "" : "required"} autocomplete="off">
     ${kid ? `<button type="button" class="bad" id="delKid" style="margin-top:16px">Remover ${esc(kid.name)}</button>` : ""}`,
@@ -820,6 +915,7 @@ function kidForm(kid) {
     const name = fd.get("name").trim(), pin = fd.get("pin");
     if (!name) throw new Error("Escreve o nome.");
     const data = { name, emoji: fd.get("emoji") };
+    if (photo.changed) data.photo = photo.dataUrl();
     if (pin || !kid) {
       if (!validPin(pin)) throw new Error("O PIN tem de ter 4 a 6 dígitos.");
       data.pinHash = await hashPin(pin);
@@ -827,6 +923,7 @@ function kidForm(kid) {
     if (kid) await updateDoc(doc(col("kids"), kid.id), data);
     else await addDoc(col("kids"), { ...data, points: 0, order: S.kids.length, createdAt: serverTimestamp() });
   });
+  const photo = photoEditor(form, kid?.photo && PHOTO_RE.test(kid.photo) ? kid.photo : null);
   const del = form.querySelector("#delKid");
   if (del) del.onclick = () => guard(async () => {
     if (!confirm(`Remover ${kid.name}? Perde os ${kid.points || 0} pontos. O histórico fica guardado.`)) return;
@@ -844,7 +941,7 @@ function taskForm(task, recurringDefault = true) {
     <label class="inline"><input type="radio" name="kind" value="rec" ${recurring ? "checked" : ""}> 📅 Recorrente (todos os dias)</label>
     <label class="inline"><input type="radio" name="kind" value="extra" ${recurring ? "" : "checked"}> ✨ Espontânea (quando acontece)</label>
     <label>Para quem</label>
-    ${S.kids.length ? S.kids.map((k) => `<label class="inline"><input type="checkbox" name="kids" value="${k.id}" ${!task?.kidIds?.length || task.kidIds.includes(k.id) ? "checked" : ""}> ${esc(k.emoji)} ${esc(k.name)}</label>`).join("") : `<p class="small muted">Todos os filhos.</p>`}
+    ${S.kids.length ? S.kids.map((k) => `<label class="inline"><input type="checkbox" name="kids" value="${k.id}" ${!task?.kidIds?.length || task.kidIds.includes(k.id) ? "checked" : ""}> ${avatar(k, "xs")} ${esc(k.name)}</label>`).join("") : `<p class="small muted">Todos os filhos.</p>`}
     ${task ? `<button type="button" class="bad" id="delTask" style="margin-top:16px">Apagar tarefa</button>` : ""}`,
   async (fd) => {
     const title = fd.get("title").trim();
