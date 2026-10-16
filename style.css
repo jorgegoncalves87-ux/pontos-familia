@@ -203,3 +203,9 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-weight:
 .profile .emoji .avatar.lg { box-shadow: 0 0 0 3px var(--card), 0 0 0 5px var(--primary); }
 h1.row, h2.row { gap: 10px; }
 .photo-edit { width: 120px; height: 120px; border-radius: 50%; touch-action: none; cursor: grab; border: 2px solid var(--border); }
+
+/* Títulos compridos das tarefas passam para a linha de baixo em vez de ficarem por cima dos pontos. */
+.task { white-space: normal; }
+.task .grow { min-width: 0; overflow-wrap: anywhere; }
+.task .pts, .card .pts { flex: none; }
+.card .grow b { overflow-wrap: anywhere; }
