@@ -801,9 +801,14 @@ function bindParentActions() {
   on("#addReward", () => rewardForm(null));
 }
 
+const MAX_POINTS = 1000000;
+
 function readPoints(v, { allowZero = false } = {}) {
   const n = Number(v);
-  if (!Number.isInteger(n) || n < (allowZero ? 0 : 1) || n > 10000) throw new Error("Os pontos têm de ser um número inteiro positivo.");
+  const min = allowZero ? 0 : 1;
+  if (!Number.isInteger(n) || n < min || n > MAX_POINTS) {
+    throw new Error(`Os pontos têm de ser um número inteiro entre ${min} e ${MAX_POINTS.toLocaleString("pt-PT")}.`);
+  }
   return n;
 }
 
