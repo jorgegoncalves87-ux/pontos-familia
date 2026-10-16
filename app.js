@@ -5,9 +5,11 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, collection, onSnapshot, writeBatch,
+  arrayUnion, arrayRemove,
   query, orderBy, limit, runTransaction, serverTimestamp, connectFirestoreEmulator,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js";
+import { getMessaging, getToken, isSupported as messagingSupported } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
+import { firebaseConfig, vapidKey } from "./firebase-config.js";
 
 // ---------- Firebase ----------
 // ?emulator abre a app contra os emuladores locais (apenas para testes).
@@ -15,9 +17,9 @@ const useEmulator = new URLSearchParams(location.search).has("emulator");
 const config = useEmulator ? { apiKey: "demo", projectId: "demo-pontos", authDomain: "localhost" } : firebaseConfig;
 const configured = useEmulator || !String(firebaseConfig.apiKey).startsWith("COLOCA");
 
-let auth, db;
+let auth, db, fbApp;
 if (configured) {
-  const fbApp = initializeApp(config);
+  fbApp = initializeApp(config);
   auth = getAuth(fbApp);
   db = getFirestore(fbApp);
   if (useEmulator) {
@@ -252,6 +254,58 @@ if (configured) {
 } else {
   renderNotConfigured();
 }
+
+// ---------- Notificações ----------
+// Cada aparelho guarda o seu token em families/<id>/pushTokens/<id>, com quem quer avisos:
+// { parent: true } e/ou { kids: [ids] }. O envio é feito pelo notificador (notifier/notify.mjs).
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const pushKey = (who) => `pf-push-${S.familyId}-${who}`;
+const pushOn = (who) => {
+  try { return typeof Notification !== "undefined" && Notification.permission === "granted" && !!localStorage.getItem(pushKey(who)); }
+  catch { return false; }
+};
+
+async function sha256hex(text) {
+  const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function pushToken() {
+  if (!vapidKey) throw new Error("As notificações ainda não estão configuradas (falta a chave Web Push).");
+  if (!(await messagingSupported().catch(() => false)) || !("serviceWorker" in navigator)) {
+    throw new Error(isIOS() && !isStandalone()
+      ? "No iPhone, primeiro adiciona a app ao ecrã principal (Partilhar → Adicionar ao ecrã principal) e abre-a a partir do ícone."
+      : "Este navegador não suporta notificações.");
+  }
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") throw new Error("As notificações foram bloqueadas. Ativa-as nas definições do telemóvel para esta app.");
+  const reg = await navigator.serviceWorker.register("./sw.js");
+  const token = await getToken(getMessaging(fbApp), { vapidKey, serviceWorkerRegistration: reg });
+  if (!token) throw new Error("Não foi possível ativar as notificações.");
+  return token;
+}
+
+/** Liga ou desliga os avisos deste aparelho para o pai/mãe ("parent") ou para um filho (id). */
+async function togglePush(who) {
+  if (pushOn(who)) {
+    const id = localStorage.getItem(pushKey(who));
+    await updateDoc(doc(col("pushTokens"), id), who === "parent" ? { parent: false } : { kids: arrayRemove(who) }).catch(() => {});
+    try { localStorage.removeItem(pushKey(who)); } catch {}
+    toast("Notificações desligadas neste aparelho.");
+  } else {
+    const token = await pushToken();
+    const id = (await sha256hex(token)).slice(0, 40);
+    await setDoc(doc(col("pushTokens"), id), {
+      token, updatedAt: serverTimestamp(), device: navigator.userAgent.slice(0, 150),
+      ...(who === "parent" ? { parent: true } : { kids: arrayUnion(who) }),
+    }, { merge: true });
+    try { localStorage.setItem(pushKey(who), id); } catch {}
+    toast("Notificações ligadas! 🔔");
+  }
+  render();
+}
+const bellButton = (who) => `<button class="link" id="bell" title="Notificações">${pushOn(who) ? "🔔" : "🔕"}</button>`;
 
 // ---------- Render principal ----------
 function render() {
@@ -581,11 +635,12 @@ function renderKid(kid) {
   }
   const pending = S.log.filter((e) => e.kidId === kid.id && e.type === "task" && e.status === "pending")
     .reduce((s, e) => s + e.points, 0);
-  app.innerHTML = `<div class="header"><h1 class="row">${avatar(kid, "md")} ${esc(kid.name)}</h1><button class="link" id="switch">Trocar</button></div>
+  app.innerHTML = `<div class="header"><h1 class="row">${avatar(kid, "md")} ${esc(kid.name)}</h1><div>${bellButton(kid.id)}<button class="link" id="switch">Trocar</button></div></div>
     <div class="balance"><div class="big">⭐ ${kid.points || 0}</div><div>pontos${pending ? ` · +${pending} por validar` : ""}</div></div>
     ${body}${nav}`;
   document.getElementById("switch").onclick = () => setRole(null);
   bindTabs();
+  document.getElementById("bell").onclick = () => guard(() => togglePush(kid.id));
   bindKidActions(kid);
   bindCharts();
 }
@@ -703,11 +758,12 @@ function renderParent() {
   const nav = renderTabs(tabs);
   const views = { validate: parentValidate, kids: parentKids, tasks: parentTasks, rewards: parentRewards, history: parentHistory };
   app.innerHTML = `<div class="header"><h1 class="row">${parentAvatar("md")} Pai / Mãe</h1>
-    <div><button class="link" id="settings">⚙️</button><button class="link" id="switch">Trocar</button></div></div>
+    <div>${bellButton("parent")}<button class="link" id="settings">⚙️</button><button class="link" id="switch">Trocar</button></div></div>
     ${views[S.tab]()}${nav}`;
   document.getElementById("switch").onclick = () => setRole(null);
   document.getElementById("settings").onclick = openSettings;
   bindTabs();
+  document.getElementById("bell").onclick = () => guard(() => togglePush("parent"));
   bindParentActions();
   bindCharts();
 }

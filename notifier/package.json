@@ -1,0 +1,7 @@
+{
+  "name": "pontos-familia-notifier",
+  "private": true,
+  "type": "module",
+  "scripts": { "notify": "node notify.mjs" },
+  "dependencies": { "firebase-admin": "^12.7.0" }
+}

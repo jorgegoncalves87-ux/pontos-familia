@@ -33,6 +33,19 @@ Tudo gratuito: o código é servido pelo GitHub Pages e os dados ficam no Fireba
 - Os filhos podem marcar tarefas dos últimos 3 dias (o pai/mãe muda isto em ⚙️ Definições, de 0 a 14 dias). O pai/mãe valida quando quiser.
 - O histórico mostra os últimos 500 registos.
 
+## Notificações (opcional)
+
+O notificador (`notifier/notify.mjs`) corre de graça no GitHub Actions a cada ~10 minutos (o GitHub pode atrasar alguns minutos) e envia:
+- ao pai/mãe: tarefas marcadas, prémios pedidos e prémios sugeridos à espera de validação;
+- aos filhos: pontos validados ou rejeitados, bónus e penalizações;
+- aos filhos, por volta das 19:45: lembrete se ainda há tarefas do dia por marcar.
+
+Para ligar:
+1. Consola Firebase → ⚙️ Configurações do projeto → **Cloud Messaging** → *Certificados push da Web* → **Gerar par de chaves**. Copia a chave para `vapidKey` em `firebase-config.js`.
+2. Consola Firebase → ⚙️ Configurações do projeto → **Contas de serviço** → **Gerar nova chave privada** (descarrega um ficheiro JSON). **É uma chave secreta — não a partilhes nem a ponhas no repositório.**
+3. GitHub → repositório → *Settings → Secrets and variables → Actions → New repository secret*: nome `FIREBASE_SERVICE_ACCOUNT`, valor = o conteúdo todo do ficheiro JSON.
+4. Em cada aparelho, toca no 🔕 no topo da app (pai/mãe e cada filho) e aceita as notificações. No iPhone isto só funciona com a app aberta a partir do ícone do ecrã principal (iOS 16.4 ou mais recente).
+
 ## Testes locais (opcional)
 
 ```bash
