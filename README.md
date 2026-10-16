@@ -11,7 +11,7 @@ Tudo gratuito: o código é servido pelo GitHub Pages e os dados ficam no Fireba
 ## Configuração (uma vez, ~10 minutos)
 
 1. **Criar o projeto Firebase**: em <https://console.firebase.google.com> → *Adicionar projeto*. O Google Analytics não é preciso.
-2. **Ativar o login**: *Build → Authentication → Começar → Email/Password → Ativar*.
+2. **Ativar o login**: *Authentication → Método de login*: ativa **E-mail/senha** e **Anônimo** (o anónimo é o que deixa os filhos entrar só com o link e o PIN).
 3. **Criar a base de dados**: *Build → Firestore Database → Criar base de dados*, escolhe a região `eur3 (europe-west)` e o *modo de produção*.
 4. **Regras de segurança**: em *Firestore → Regras*, substitui o conteúdo pelo de [`firestore.rules`](firestore.rules) e carrega em *Publicar*.
 5. **Registar a app web**: em *Definições do projeto (⚙️) → Geral → As tuas apps → `</>`*, dá-lhe um nome e copia o objeto `firebaseConfig` para [`firebase-config.js`](firebase-config.js).
@@ -22,12 +22,13 @@ Tudo gratuito: o código é servido pelo GitHub Pages e os dados ficam no Fireba
 
 1. Abre a app e carrega em **Criar conta da família** (email e password teus).
 2. Escolhe o PIN do pai/mãe e adiciona os filhos, cada um com o seu PIN.
-3. Em cada aparelho dos filhos, entra uma vez com a conta da família. A app lembra-se do perfil do filho; o modo pai pede sempre o PIN.
+3. Para cada aparelho dos filhos: em ⚙️ Definições → **Ligar aparelho de um filho**, envia o link para esse aparelho e abre-o lá. Os filhos não precisam de email nem password — só do PIN, que é pedido sempre que a app abre.
+   - Para desligar os aparelhos (por exemplo, se o link chegar a quem não devia), usa **Desligar todos**: o link antigo deixa de funcionar.
 4. Dica: no telemóvel, usa *Partilhar → Adicionar ao ecrã principal* para a app ficar com ícone.
 
 ## Limitações a saber
 
-- **Os PINs protegem o ecrã, não o servidor.** Todos os aparelhos usam a mesma conta da família, por isso alguém com conhecimentos técnicos e acesso à conta poderia alterar dados sem passar pela app. Para crianças chega. Se um dia não chegar, o passo seguinte é dar uma conta Firebase a cada filho e tornar as regras mais restritivas.
+- **Os PINs protegem o ecrã, não o servidor.** Todos os aparelhos ligados têm acesso aos dados da família, por isso alguém com conhecimentos técnicos e acesso à conta poderia alterar dados sem passar pela app. Para crianças chega. Se um dia não chegar, o passo seguinte é dar uma conta Firebase a cada filho e tornar as regras mais restritivas.
 - Os filhos podem marcar tarefas dos últimos 3 dias (o pai/mãe muda isto em ⚙️ Definições, de 0 a 14 dias). O pai/mãe valida quando quiser.
 - O histórico mostra os últimos 500 registos.
 

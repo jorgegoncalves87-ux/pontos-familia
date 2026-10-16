@@ -1,12 +1,25 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Cada família só vê e altera os seus próprios dados.
+    // Membro da família = a conta da família (email/password) ou um aparelho ligado por link.
+    function isMember(familyId) {
+      return request.auth != null && (
+        request.auth.uid == familyId ||
+        exists(/databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid))
+      );
+    }
+
     match /families/{familyId} {
-      allow read, write: if request.auth != null && request.auth.uid == familyId;
+      allow read, write: if isMember(familyId);
+
+      // Um aparelho novo liga-se à família com o código do link de ligação.
+      match /members/{uid} {
+        allow create: if request.auth != null && request.auth.uid == uid
+          && request.resource.data.token == get(/databases/$(database)/documents/families/$(familyId)).data.inviteToken;
+      }
 
       match /{document=**} {
-        allow read, write: if request.auth != null && request.auth.uid == familyId;
+        allow read, write: if isMember(familyId);
       }
     }
   }

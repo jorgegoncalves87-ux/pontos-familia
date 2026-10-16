@@ -1,10 +1,10 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  signOut, sendPasswordResetEmail, connectAuthEmulator,
+  signOut, sendPasswordResetEmail, signInAnonymously, connectAuthEmulator,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, onSnapshot,
+  getFirestore, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, collection, onSnapshot, writeBatch,
   query, orderBy, limit, runTransaction, serverTimestamp, connectFirestoreEmulator,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
@@ -29,6 +29,9 @@ if (configured) {
 // ---------- Estado ----------
 const S = {
   user: null,
+  familyId: null, // = uid da conta da família; nos aparelhos dos filhos vem do link de ligação
+  linkError: null, // "invalid" | "revoked" quando o aparelho não está ligado
+  joining: false,
   fam: undefined, // undefined = a carregar, null = família por configurar
   kids: [], tasks: [], rewards: [], log: [],
   kidsLoaded: false,
@@ -42,8 +45,23 @@ const DAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const EMOJIS = ["🦁", "🐯", "🐼", "🦊", "🐸", "🐵", "🦄", "🐙", "🐧", "🐶", "🐱", "🚀", "⚽", "🎨", "🌟"];
 const LOG_LIMIT = 500;
 
-const famDoc = () => doc(db, "families", S.user.uid);
-const col = (name) => collection(db, "families", S.user.uid, name);
+const famDoc = () => doc(db, "families", S.familyId);
+const col = (name) => collection(db, "families", S.familyId, name);
+const FAMILY_KEY = "pf-family";
+const isDevice = () => !!S.user?.isAnonymous; // aparelho ligado por link (sem email/password)
+
+// Link de ligação: #join=<familyId>.<código>
+let JOIN = (() => {
+  const m = location.hash.match(/^#join=([A-Za-z0-9_-]+)\.([a-f0-9]{16,})$/);
+  return m ? { familyId: m[1], token: m[2] } : null;
+})();
+const joinLink = (token) => `${location.origin}${location.pathname}#join=${S.familyId}.${token}`;
+/** Esquece o link do endereço (para não voltar a ligar o aparelho sozinho). */
+function forgetJoinLink() {
+  JOIN = null;
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+}
+const newToken = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
 const app = document.getElementById("app");
 
 // ---------- Utilitários ----------
@@ -67,7 +85,7 @@ const STATUS_LABEL = { pending: "Por validar", approved: "Aprovado", rejected: "
 const statusPill = (s) => `<span class="pill ${s}">${STATUS_LABEL[s]}</span>`;
 
 async function hashPin(pin) {
-  const data = new TextEncoder().encode(`${S.user.uid}:${pin}`);
+  const data = new TextEncoder().encode(`${S.familyId}:${pin}`);
   const h = await crypto.subtle.digest("SHA-256", data);
   return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -126,7 +144,11 @@ function stopListeners() { S.unsub.forEach((u) => u()); S.unsub = []; }
 
 function startListeners() {
   stopListeners();
-  const onErr = (e) => { console.error(e); toast("Erro a ler dados: " + e.code); };
+  const onErr = (e) => {
+    console.error(e);
+    if (e.code === "permission-denied" && isDevice()) return unlinkDevice("revoked");
+    toast("Erro a ler dados: " + e.code);
+  };
   S.unsub.push(onSnapshot(famDoc(), (snap) => { S.fam = snap.exists() ? snap.data() : null; render(); }, onErr));
   S.unsub.push(onSnapshot(col("kids"), (snap) => {
     S.kidsLoaded = true;
@@ -147,29 +169,67 @@ function startListeners() {
   }, onErr));
 }
 
-const roleKey = () => `pf-role-${S.user.uid}`;
 function setRole(role) {
   S.role = role;
   S.tab = null;
   S.kidDate = null;
-  // Só o perfil de filho fica lembrado no aparelho; o modo pai exige sempre o PIN.
-  try { role && role !== "parent" ? localStorage.setItem(roleKey(), role) : localStorage.removeItem(roleKey()); } catch {}
+  render();
+}
+
+/** Liga este aparelho à família do link (conta anónima + registo em members/). */
+async function joinFamily(user) {
+  S.joining = true;
+  render();
+  try {
+    await setDoc(doc(db, "families", JOIN.familyId, "members", user.uid),
+      { token: JOIN.token, joinedAt: serverTimestamp(), device: navigator.userAgent.slice(0, 150) }, { merge: true });
+    try { localStorage.setItem(FAMILY_KEY, JOIN.familyId); } catch {}
+    S.linkError = null;
+    return JOIN.familyId;
+  } catch (e) {
+    console.error(e);
+    S.linkError = "invalid";
+    return null;
+  } finally {
+    S.joining = false;
+  }
+}
+
+/** Desliga este aparelho (conta anónima) da família. */
+async function unlinkDevice(reason = null) {
+  stopListeners();
+  try { localStorage.removeItem(FAMILY_KEY); } catch {}
+  S.familyId = null;
+  S.linkError = reason;
+  S.fam = undefined;
   render();
 }
 
 if (configured) {
-  onAuthStateChanged(auth, (user) => {
+  onAuthStateChanged(auth, async (user) => {
+    stopListeners();
     S.user = user;
     S.fam = undefined;
     S.kids = []; S.tasks = []; S.rewards = []; S.log = [];
     S.kidsLoaded = false;
     S.role = null;
-    if (user) {
-      try { S.role = localStorage.getItem(roleKey()); } catch {}
-      startListeners();
-    } else {
-      stopListeners();
+    S.familyId = null;
+    if (!user) {
+      // Abriu um link de ligação: entra sem email nem password.
+      if (JOIN) { S.joining = true; render(); await signInAnonymously(auth).catch((e) => { S.joining = false; S.linkError = "invalid"; console.error(e); render(); }); return; }
+      return render();
     }
+    if (!user.isAnonymous) {
+      S.familyId = user.uid;
+    } else {
+      let saved = null;
+      try { saved = localStorage.getItem(FAMILY_KEY); } catch {}
+      // O link fica no endereço de propósito (o iPhone guarda-o no ícone do ecrã principal).
+      S.familyId = JOIN ? await joinFamily(user) : saved;
+      if (!S.familyId) return render();
+    }
+    // Nenhum perfil fica lembrado: ao abrir a app, cada um entra com o seu PIN.
+    startListeners();
     render();
   });
 } else {
@@ -179,7 +239,9 @@ if (configured) {
 // ---------- Render principal ----------
 function render() {
   if (!configured) return renderNotConfigured();
+  if (S.joining) { app.innerHTML = `<div class="center muted">A ligar este aparelho…</div>`; return; }
   if (!S.user) return renderLogin();
+  if (!S.familyId) return renderNotLinked();
   if (S.fam === undefined) { app.innerHTML = `<div class="center muted">A carregar…</div>`; return; }
   if (S.fam === null) return renderSetup();
   if (S.role && S.role !== "parent" && !kidById(S.role)) {
@@ -193,6 +255,17 @@ function render() {
   return renderKid(kidById(S.role));
 }
 
+function renderNotLinked() {
+  const msg = S.linkError === "revoked"
+    ? "Este aparelho foi desligado pelo pai/mãe."
+    : S.linkError === "invalid" ? "Este link de ligação já não é válido." : "Este aparelho ainda não está ligado à família.";
+  app.innerHTML = `<div class="card" style="max-width:420px;margin:40px auto 0;text-align:center">
+    <h1>⭐ Pontos da Família</h1><p>${msg}</p>
+    <p class="muted">Pede ao pai/mãe um link novo: na app, ⚙️ Definições → <b>Ligar aparelho de um filho</b>.</p>
+    <button class="link" id="toLogin">Sou o pai/mãe: entrar com email</button></div>`;
+  document.getElementById("toLogin").onclick = () => { forgetJoinLink(); signOut(auth); };
+}
+
 function renderNotConfigured() {
   app.innerHTML = `<div class="card"><h1>⭐ Pontos da Família</h1>
     <p>Falta ligar a app ao Firebase. Edita o ficheiro <b>firebase-config.js</b> com a configuração do teu projeto — os passos estão no README.</p></div>`;
@@ -201,7 +274,7 @@ function renderNotConfigured() {
 function renderLogin() {
   app.innerHTML = `<div style="max-width:420px;margin:40px auto 0">
     <h1 style="text-align:center">⭐ Pontos da Família</h1>
-    <p class="muted" style="text-align:center">Entra com a conta da família. Só é preciso fazer isto uma vez em cada aparelho.</p>
+    <p class="muted" style="text-align:center">Pai/mãe: entra com a conta da família.<br>Filhos: abram o link que o pai/mãe vos enviou — não precisam de email.</p>
     <form class="card" id="loginForm">
       <label>Email</label><input name="email" type="email" autocomplete="username" required>
       <label>Password</label><input name="password" type="password" autocomplete="current-password" required minlength="6">
@@ -277,13 +350,13 @@ function renderSetup() {
 }
 
 function renderProfiles() {
-  app.innerHTML = `<div class="header"><h1>Quem és tu?</h1><button class="link" id="logout">Sair</button></div>
+  app.innerHTML = `<div class="header"><h1>Quem és tu?</h1><button class="link" id="logout">${isDevice() ? "Desligar" : "Sair"}</button></div>
     <div class="profiles">
       ${S.kids.map((k) => `<button class="profile" data-kid="${k.id}"><span class="emoji">${esc(k.emoji)}</span>${esc(k.name)}</button>`).join("")}
       <button class="profile" data-parent><span class="emoji">🔐</span>Pai / Mãe</button>
     </div>
     ${S.kids.length ? "" : `<p class="muted" style="margin-top:16px">Ainda não há filhos. Entra como pai/mãe para os adicionar.</p>`}`;
-  document.getElementById("logout").onclick = () => { if (confirm("Sair da conta da família neste aparelho?")) signOut(auth); };
+  document.getElementById("logout").onclick = () => leaveDevice();
   app.querySelector("[data-parent]").onclick = () => askPin("PIN do pai/mãe", async (pin) => {
     if ((await hashPin(pin)) !== S.fam.parentPinHash) throw new Error("PIN errado.");
     setRole("parent");
@@ -725,8 +798,14 @@ function openSettings() {
     <label>Os filhos podem marcar tarefas até quantos dias para trás?</label>
     <input name="backDays" type="number" inputmode="numeric" min="0" max="${MAX_BACK_DAYS}" required value="${backDays()}">
     <p class="small muted">0 = só o próprio dia. Máximo ${MAX_BACK_DAYS}.</p>
-    <p class="small muted">Conta: ${esc(S.user.email)}</p>
-    <button type="button" class="bad" id="logoutAll" style="margin-top:8px">Sair da conta neste aparelho</button>`,
+    <label>Aparelhos dos filhos</label>
+    <p class="small muted" id="devCount">A contar aparelhos ligados…</p>
+    <div class="row wrap">
+      <button type="button" class="good" id="linkDevice">Ligar aparelho de um filho</button>
+      <button type="button" class="bad" id="unlinkAll">Desligar todos</button>
+    </div>
+    <p class="small muted" style="margin-top:16px">${isDevice() ? "Aparelho ligado por link" : `Conta: ${esc(S.user.email)}`}</p>
+    <button type="button" class="bad" id="logoutAll" style="margin-top:8px">${isDevice() ? "Desligar este aparelho" : "Sair da conta neste aparelho"}</button>`,
   async (fd) => {
     const pin = fd.get("pin");
     const back = Number(fd.get("backDays"));
@@ -741,5 +820,68 @@ function openSettings() {
     await updateDoc(famDoc(), changes);
     toast("Definições guardadas.");
   });
-  form.querySelector("#logoutAll").onclick = () => { closeModal(); signOut(auth); };
+  form.querySelector("#logoutAll").onclick = () => { closeModal(); leaveDevice(); };
+  form.querySelector("#linkDevice").onclick = () => guard(openLinkDevice);
+  form.querySelector("#unlinkAll").onclick = () => guard(async () => {
+    if (!confirm("Desligar todos os aparelhos ligados por link? Vão precisar de um link novo para voltar a entrar.")) return;
+    const n = await revokeDevices();
+    form.querySelector("#devCount").textContent = `Desligados ${n} aparelho(s). O link antigo deixou de funcionar.`;
+  });
+  getDocs(col("members")).then((snap) => {
+    const el = form.querySelector("#devCount");
+    if (el) el.textContent = snap.size ? `${snap.size} aparelho(s) ligado(s) por link.` : "Nenhum aparelho ligado por link.";
+  }).catch(() => {});
+}
+
+/** Sair (conta da família) ou desligar (aparelho ligado por link). */
+async function leaveDevice() {
+  if (isDevice()) {
+    if (!confirm("Desligar este aparelho? Para voltar a entrar é preciso um link novo do pai/mãe.")) return;
+    await deleteDoc(doc(col("members"), S.user.uid)).catch(() => {});
+    await unlinkDevice();
+    forgetJoinLink();
+    await signOut(auth);
+  } else {
+    if (!confirm("Sair da conta da família neste aparelho?")) return;
+    await signOut(auth);
+  }
+}
+
+async function openLinkDevice() {
+  let token = S.fam.inviteToken;
+  if (!token) {
+    token = newToken();
+    await updateDoc(famDoc(), { inviteToken: token });
+  }
+  const link = joinLink(token);
+  modal.innerHTML = `<div class="sheet"><h2 style="margin-top:0">Ligar aparelho de um filho</h2>
+    <p>Envia este link para o telemóvel ou tablet do teu filho (WhatsApp, SMS, email…). Ao abri-lo, o aparelho fica ligado à família e o filho só precisa do PIN.</p>
+    <input readonly value="${esc(link)}" id="linkBox" style="font-size:.8rem">
+    <div class="row wrap" style="margin-top:10px">
+      ${navigator.share ? `<button class="primary" id="shareLink">Partilhar</button>` : ""}
+      <button id="copyLink">Copiar link</button>
+    </div>
+    <p class="small muted" style="margin-top:14px"><b>Ícone no ecrã principal:</b> depois de abrir o link no aparelho do filho, usa logo aí "Adicionar ao ecrã principal".</p>
+    <p class="small muted">⚠️ Quem tiver este link entra na app da família (mas precisa dos PINs). Se o link chegar a quem não devia, usa "Desligar todos".</p>
+    <div class="actions"><button data-close>Fechar</button></div></div>`;
+  modal.classList.remove("hidden");
+  modal.querySelector("[data-close]").onclick = closeModal;
+  modal.querySelector("#copyLink").onclick = async () => {
+    try { await navigator.clipboard.writeText(link); toast("Link copiado."); }
+    catch { const box = modal.querySelector("#linkBox"); box.select(); toast("Seleciona e copia o link."); }
+  };
+  const share = modal.querySelector("#shareLink");
+  if (share) share.onclick = () => navigator.share({ title: "Pontos da Família", text: "Abre este link para entrar na app:", url: link }).catch(() => {});
+}
+
+/** Desliga todos os aparelhos ligados por link e invalida o link antigo. */
+async function revokeDevices() {
+  const snap = await getDocs(col("members"));
+  const batch = writeBatch(db);
+  batch.update(famDoc(), { inviteToken: newToken() });
+  // Um aparelho ligado não se desliga a si próprio aqui, para não perder o acesso a meio.
+  let n = 0;
+  snap.docs.forEach((d) => { if (d.id !== S.user.uid) { batch.delete(d.ref); n++; } });
+  await batch.commit();
+  return n;
 }
