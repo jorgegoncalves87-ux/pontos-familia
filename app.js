@@ -1142,6 +1142,9 @@ function openSettings() {
       <button type="button" class="good" id="linkDevice">Ligar aparelho de um filho</button>
       <button type="button" class="bad" id="unlinkAll">Desligar todos</button>
     </div>
+    <label>Recomeçar</label>
+    <p class="small muted">Põe o saldo de todos os filhos a 0 e apaga o histórico de pontos (tarefas marcadas, validações, bónus, penalizações e pedidos de prémio). Filhos, tarefas e prémios ficam.</p>
+    <button type="button" class="bad" id="resetPoints">Apagar todos os pontos</button>
     <p class="small muted" style="margin-top:16px">${isDevice() ? "Aparelho ligado por link" : `Conta: ${esc(S.user.email)}`}</p>
     <button type="button" class="bad" id="logoutAll" style="margin-top:8px">${isDevice() ? "Desligar este aparelho" : "Sair da conta neste aparelho"}</button>`,
   async (fd) => {
@@ -1162,6 +1165,13 @@ function openSettings() {
   const photo = photoEditor(form, S.fam.parentPhoto && PHOTO_RE.test(S.fam.parentPhoto) ? S.fam.parentPhoto : null);
   form.querySelector("#logoutAll").onclick = () => { closeModal(); leaveDevice(); };
   form.querySelector("#linkDevice").onclick = () => guard(openLinkDevice);
+  form.querySelector("#resetPoints").onclick = () => guard(async () => {
+    if (!confirm("Apagar TODOS os pontos e o histórico? Isto não se pode desfazer.")) return;
+    if (!confirm("Tens a certeza? Os saldos de todos os filhos voltam a 0.")) return;
+    const n = await resetPoints();
+    closeModal();
+    toast(`Pontos apagados (${n} registos). Recomeçar! 🚀`);
+  });
   form.querySelector("#unlinkAll").onclick = () => guard(async () => {
     if (!confirm("Desligar todos os aparelhos ligados por link? Vão precisar de um link novo para voltar a entrar.")) return;
     const n = await revokeDevices();
@@ -1212,6 +1222,18 @@ async function openLinkDevice() {
   };
   const share = modal.querySelector("#shareLink");
   if (share) share.onclick = () => navigator.share({ title: "Pontos da Família", text: "Abre este link para entrar na app:", url: link }).catch(() => {});
+}
+
+/** Saldos a 0 e histórico apagado; filhos, tarefas e prémios mantêm-se. Devolve quantos registos apagou. */
+async function resetPoints() {
+  const snap = await getDocs(col("log"));
+  const ops = [...snap.docs.map((d) => (b) => b.delete(d.ref)), ...S.kids.map((k) => (b) => b.update(doc(col("kids"), k.id), { points: 0 }))];
+  for (let i = 0; i < ops.length; i += 400) {
+    const batch = writeBatch(db);
+    ops.slice(i, i + 400).forEach((op) => op(batch));
+    await batch.commit();
+  }
+  return snap.size;
 }
 
 /** Desliga todos os aparelhos ligados por link e invalida o link antigo. */
