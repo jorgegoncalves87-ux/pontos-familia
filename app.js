@@ -142,6 +142,9 @@ function askPin(title, check) {
 // ---------- Ciclo de vida ----------
 function stopListeners() { S.unsub.forEach((u) => u()); S.unsub = []; }
 
+/** Ordena sempre por pontos (do menor para o maior) e, em empate, por nome. */
+const byValue = (field) => (a, b) => (a[field] ?? 0) - (b[field] ?? 0) || a.title.localeCompare(b.title, "pt");
+
 function startListeners() {
   stopListeners();
   const onErr = (e) => {
@@ -156,11 +159,11 @@ function startListeners() {
     render();
   }, onErr));
   S.unsub.push(onSnapshot(col("tasks"), (snap) => {
-    S.tasks = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.title.localeCompare(b.title));
+    S.tasks = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort(byValue("points"));
     render();
   }, onErr));
   S.unsub.push(onSnapshot(col("rewards"), (snap) => {
-    S.rewards = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (a.cost ?? 0) - (b.cost ?? 0));
+    S.rewards = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort(byValue("cost"));
     render();
   }, onErr));
   S.unsub.push(onSnapshot(query(col("log"), orderBy("createdAt", "desc"), limit(LOG_LIMIT)), (snap) => {
@@ -873,7 +876,8 @@ function ideasForm(kind) {
   const isTasks = kind === "tasks";
   const existing = new Set((isTasks ? S.tasks.filter((t) => t.active !== false) : S.rewards.filter((r) => r.status === "active"))
     .map((x) => x.title.trim().toLowerCase()));
-  const ideas = (isTasks ? TASK_IDEAS : REWARD_IDEAS).filter(([title]) => !existing.has(title.toLowerCase()));
+  const ideas = (isTasks ? TASK_IDEAS : REWARD_IDEAS).filter(([title]) => !existing.has(title.toLowerCase()))
+    .sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0], "pt"));
   if (!ideas.length) { toast("Já adicionaste todas as ideias."); return; }
   const form = openForm(isTasks ? "Ideias de tarefas recorrentes" : "Ideias de prémios", `
     <p class="small muted">Escolhe as que queres e ajusta os pontos. ${isTasks ? "Ficam como recorrentes, para todos os filhos." : ""}</p>
