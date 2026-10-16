@@ -94,14 +94,17 @@ async function processFamily(fam) {
     const byKid = new Map();
     for (const d of newPending) {
       const e = d.data();
-      const k = byKid.get(e.kidId) || { tasks: 0, rewards: [] };
-      if (e.type === "reward") k.rewards.push(e.title); else k.tasks++;
+      const k = byKid.get(e.kidId) || { tasks: 0, rewards: [], extras: [] };
+      if (e.type === "reward") k.rewards.push(e.title);
+      else if (e.type === "extra") k.extras.push(e.title);
+      else k.tasks++;
       byKid.set(e.kidId, k);
     }
     for (const [kidId, k] of byKid) {
       const parts = [];
       if (k.tasks) parts.push(`marcou ${plural(k.tasks, "tarefa", "tarefas")}`);
       if (k.rewards.length) parts.push(`pediu ${k.rewards.length === 1 ? `o prémio "${k.rewards[0]}"` : `${k.rewards.length} prémios`}`);
+      if (k.extras.length) parts.push(`pede pontos por ${k.extras.length === 1 ? `"${k.extras[0]}"` : `${k.extras.length} coisas fora da lista`}`);
       lines.push(`${kidName(kidId)} ${parts.join(" e ")}`);
     }
     for (const d of newSugg) lines.push(`${kidName(d.get("suggestedBy"))} sugeriu o prémio "${d.get("title")}"`);
@@ -135,6 +138,7 @@ async function processFamily(fam) {
       if (okTasks.length) lines.push(`✅ ${plural(okTasks.length, "tarefa validada", "tarefas validadas")}: ${signed(okTasks.reduce((s, e) => s + (e.applied ?? e.points), 0))} pontos`);
       const noTasks = entries.filter((e) => e.type === "task" && e.status === "rejected");
       if (noTasks.length) lines.push(`✕ ${plural(noTasks.length, "tarefa não foi aceite", "tarefas não foram aceites")}`);
+      for (const e of entries.filter((e) => e.type === "extra")) lines.push(e.status === "approved" ? `💡 ${e.title}: ${signed(e.applied ?? e.points)} pontos` : `💡 Sem pontos para: ${e.title}`);
       for (const e of entries.filter((e) => e.type === "bonus")) lines.push(`🌟 Bónus ${signed(e.applied ?? e.points)}: ${e.title}`);
       for (const e of entries.filter((e) => e.type === "penalty")) lines.push(`⚠️ ${signed(e.applied ?? e.points)}: ${e.title}`);
       for (const e of entries.filter((e) => e.type === "reward")) lines.push(e.status === "approved" ? `🎁 Prémio aprovado: ${e.title}!` : `🎁 Prémio não aprovado: ${e.title}`);

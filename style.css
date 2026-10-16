@@ -217,3 +217,9 @@ h1.row, h2.row { gap: 10px; }
 .sib-track { height: 8px; margin-top: 6px; border-radius: 4px; background: var(--grid); overflow: hidden; }
 .sib-track i { display: block; height: 100%; border-radius: 0 4px 4px 0; background: var(--gain); }
 .sib-track i.neg { background: var(--loss); }
+
+/* Ecrãs com separadores: só o conteúdo faz scroll e a barra fica sempre em baixo (iPad incluído). */
+#app.shell { max-width: none; padding: 0; height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+#app.shell > .scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+#app.shell > .scroll > .inner { max-width: 720px; margin: 0 auto; padding: 16px 16px 24px; }
+#app.shell > .tabs { position: static; flex: none; }

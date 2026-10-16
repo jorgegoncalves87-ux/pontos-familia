@@ -309,6 +309,10 @@ const bellButton = (who) => `<button class="link" id="bell" title="Notificaçõe
 
 // ---------- Render principal ----------
 function render() {
+  if (!(S.user && S.familyId && S.fam && S.role && (S.role === "parent" || kidById(S.role)))) {
+    app.classList.remove("shell");
+    delete app.dataset.view;
+  }
   if (!configured) return renderNotConfigured();
   if (S.joining) { app.innerHTML = `<div class="center muted">A ligar este aparelho…</div>`; return; }
   if (!S.user) return renderLogin();
@@ -447,8 +451,22 @@ function renderTabs(tabs) {
     `<button data-tab="${t.id}" class="${S.tab === t.id ? "active" : ""}"><span class="ic">${t.icon}</span><span>${t.label}${t.badge ? ` <span class="badge">${t.badge}</span>` : ""}</span></button>`).join("")}</nav>`;
 }
 
+/**
+ * Ecrãs com barra de separadores: o conteúdo tem scroll próprio e a barra fica sempre em baixo
+ * (no iPad, uma barra "position: fixed" podia ficar a meio do ecrã). Mantém o scroll entre renders.
+ */
+function renderShell(content, nav) {
+  const prev = app.querySelector(".scroll");
+  const top = prev && app.classList.contains("shell") && app.dataset.view === `${S.role}:${S.tab}` ? prev.scrollTop : 0;
+  app.classList.add("shell");
+  app.dataset.view = `${S.role}:${S.tab}`;
+  app.innerHTML = `<div class="scroll"><div class="inner">${content}</div></div>${nav}`;
+  app.querySelector(".scroll").scrollTop = top;
+}
+const scrollToTop = () => { const el = app.querySelector(".scroll"); if (el) el.scrollTop = 0; else window.scrollTo(0, 0); };
+
 function bindTabs() {
-  app.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { S.tab = b.dataset.tab; render(); window.scrollTo(0, 0); }));
+  app.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { S.tab = b.dataset.tab; render(); scrollToTop(); }));
 }
 
 // ---------- Regras de negócio ----------
@@ -493,7 +511,7 @@ const pendingRewardCost = (kidId) => S.log
 const available = (kid) => (kid.points || 0) - pendingRewardCost(kid.id);
 
 /** Aprova um registo pendente e aplica os pontos ao saldo (que nunca desce abaixo de 0). */
-async function approveEntry(entryId) {
+async function approveEntry(entryId, pointsOverride = null) {
   await runTransaction(db, async (tx) => {
     const eRef = doc(col("log"), entryId);
     const e = await tx.get(eRef);
@@ -503,10 +521,12 @@ async function approveEntry(entryId) {
     const k = await tx.get(kRef);
     if (!k.exists()) throw new Error("Este filho já não existe.");
     const cur = k.data().points || 0;
-    if (entry.type === "reward" && cur < Math.abs(entry.points)) throw new Error("Saldo insuficiente para esta recompensa.");
-    const next = Math.max(0, cur + entry.points);
+    // Nos extras sugeridos pelos filhos, os pontos são os que o pai/mãe decide ao aprovar.
+    const points = pointsOverride ?? entry.points;
+    if (entry.type === "reward" && cur < Math.abs(points)) throw new Error("Saldo insuficiente para esta recompensa.");
+    const next = Math.max(0, cur + points);
     tx.update(kRef, { points: next });
-    tx.update(eRef, { status: "approved", applied: next - cur, decidedAt: serverTimestamp() });
+    tx.update(eRef, { status: "approved", points, applied: next - cur, decidedAt: serverTimestamp() });
   });
 }
 
@@ -639,7 +659,7 @@ function bindCharts() {
 }
 
 function historyItem(e, showKid) {
-  const icon = { task: "✅", reward: "🎁", penalty: "⚠️", bonus: "🌟" }[e.type] || "•";
+  const icon = { task: "✅", reward: "🎁", penalty: "⚠️", bonus: "🌟", extra: "💡" }[e.type] || "•";
   const floorNote = e.status === "approved" && e.applied !== undefined && e.applied !== e.points
     ? `<div class="small muted">Aplicado: ${e.applied} (o saldo não desce abaixo de 0)</div>` : "";
   return `<div class="card row">
@@ -667,9 +687,9 @@ function renderKid(kid) {
   }
   const pending = S.log.filter((e) => e.kidId === kid.id && e.type === "task" && e.status === "pending")
     .reduce((s, e) => s + e.points, 0);
-  app.innerHTML = `<div class="header"><h1 class="row">${avatar(kid, "md")} ${esc(kid.name)}</h1><div>${bellButton(kid.id)}<button class="link" id="switch">Trocar</button></div></div>
+  renderShell(`<div class="header"><h1 class="row">${avatar(kid, "md")} ${esc(kid.name)}</h1><div>${bellButton(kid.id)}<button class="link" id="switch">Trocar</button></div></div>
     <div class="balance"><div class="big">⭐ ${kid.points || 0}</div><div>pontos${pending ? ` · +${pending} por validar` : ""}</div></div>
-    ${body}${nav}`;
+    ${body}`, nav);
   document.getElementById("switch").onclick = () => setRole(null);
   bindTabs();
   document.getElementById("bell").onclick = () => guard(() => togglePush(kid.id));
@@ -701,7 +721,26 @@ function kidToday(kid) {
   const when = isToday ? "hoje" : date === addDays(today(), -1) ? "ontem" : `em ${dayLabel(date)}`;
   return strip + `<p class="muted">Toca nas tarefas que fizeste ${when}. O pai/mãe depois valida.</p>`
     + (rec.length ? `<h2>📅 Todos os dias <span class="muted small">· ${done}/${rec.length} feitas</span></h2>${rec.map((t) => taskButton(kid, t, date)).join("")}` : "")
-    + (extra.length ? `<h2>✨ Espontâneas</h2><p class="small muted">Fizeste alguma destas? Ganha pontos extra!</p>${extra.map((t) => taskButton(kid, t, date)).join("")}` : "");
+    + (extra.length ? `<h2>✨ Espontâneas</h2><p class="small muted">Fizeste alguma destas? Ganha pontos extra!</p>${extra.map((t) => taskButton(kid, t, date)).join("")}` : "")
+    + extraBox(kid, date);
+}
+
+/** Pedido de pontos por algo que não está na lista; o pai/mãe decide se aceita e quantos pontos vale. */
+function extraBox(kid, date) {
+  const mine = S.log.filter((e) => e.type === "extra" && e.kidId === kid.id && e.date === date);
+  return `<h2>💡 Fizeste outra coisa?</h2>
+    <p class="small muted">Conta o que fizeste que não está na lista. O pai/mãe decide se vale pontos e quantos.</p>
+    ${mine.map((e) => `<div class="card row"><div class="grow"><b>${esc(e.title)}</b>
+      ${e.status === "pending" ? `<div class="small muted">${e.suggested ? `Pediste ${e.suggested} pontos` : "À espera do pai/mãe"}</div>` : ""}</div>
+      ${e.status === "approved" ? ptsHtml(e.points) : ""}${statusPill(e.status)}
+      ${e.status === "pending" ? `<button class="link" data-undo-extra="${e.id}">Cancelar</button>` : ""}</div>`).join("")}
+    <form class="card" id="extraForm">
+      <input name="title" required maxlength="100" placeholder="Ex: Ajudei a vizinha com as compras">
+      <div class="row" style="margin-top:8px">
+        <input name="suggested" type="number" inputmode="numeric" min="1" placeholder="Pontos que achas que vale (opcional)" class="grow">
+        <button class="primary" type="submit">Pedir</button>
+      </div>
+    </form>`;
 }
 
 function taskButton(kid, t, date) {
@@ -764,6 +803,22 @@ function bindKidActions(kid) {
     });
     toast("Pedido enviado ao pai/mãe!");
   })));
+  const xf = document.getElementById("extraForm");
+  if (xf) xf.onsubmit = (ev) => {
+    ev.preventDefault();
+    const title = xf.title.value.trim();
+    if (!title) return;
+    const sug = xf.suggested.value ? Number(xf.suggested.value) : null;
+    guard(async () => {
+      if (sug !== null) readPoints(sug);
+      await addDoc(col("log"), {
+        kidId: kid.id, type: "extra", title, points: 0, suggested: sug,
+        date: S.kidDate || today(), status: "pending", createdAt: serverTimestamp(),
+      });
+      toast("Pedido enviado! O pai/mãe vai decidir. 🤞");
+    });
+  };
+  app.querySelectorAll("[data-undo-extra]").forEach((b) => (b.onclick = () => guard(() => deleteDoc(doc(col("log"), b.dataset.undoExtra)))));
   const sf = document.getElementById("suggestForm");
   if (sf) sf.onsubmit = (ev) => {
     ev.preventDefault();
@@ -789,9 +844,9 @@ function renderParent() {
   ];
   const nav = renderTabs(tabs);
   const views = { validate: parentValidate, kids: parentKids, tasks: parentTasks, rewards: parentRewards, history: parentHistory };
-  app.innerHTML = `<div class="header"><h1 class="row">${parentAvatar("md")} Pai / Mãe</h1>
+  renderShell(`<div class="header"><h1 class="row">${parentAvatar("md")} Pai / Mãe</h1>
     <div>${bellButton("parent")}<button class="link" id="settings">⚙️</button><button class="link" id="switch">Trocar</button></div></div>
-    ${views[S.tab]()}${nav}`;
+    ${views[S.tab]()}`, nav);
   document.getElementById("switch").onclick = () => setRole(null);
   document.getElementById("settings").onclick = openSettings;
   bindTabs();
@@ -811,7 +866,11 @@ function parentValidate() {
     const taskCount = items.filter((e) => e.type === "task").length;
     html += `<div class="row spread"><h2 class="row">${avatar(kid, "sm")} ${esc(kid.name)} <span class="muted small">· saldo ${kid.points || 0}</span></h2>
       ${taskCount > 1 ? `<button class="good" data-approve-all="${kid.id}">Aprovar tarefas (${taskCount})</button>` : ""}</div>`;
-    html += items.map((e) => `<div class="card row wrap">
+    html += items.map((e) => e.type === "extra" ? `<div class="card row wrap">
+      <div style="font-size:1.3rem">💡</div>
+      <div class="grow"><b>${esc(e.title)}</b><div class="small muted">Extra fora da lista · ${dayLabel(e.date)}${e.suggested ? ` · pede ${e.suggested} pts` : ""}</div></div>
+      <button class="good" data-give-extra="${e.id}">Dar pontos</button>
+      <button class="bad" data-reject="${e.id}" aria-label="Rejeitar">✕</button></div>` : `<div class="card row wrap">
       <div style="font-size:1.3rem">${e.type === "reward" ? "🎁" : "✅"}</div>
       <div class="grow"><b>${esc(e.title)}</b><div class="small muted">${e.type === "reward" ? "Pedido de prémio" : "Tarefa"} · ${dayLabel(e.date)}</div></div>
       ${ptsHtml(e.points)}
@@ -872,6 +931,12 @@ function parentHistory() {
 function bindParentActions() {
   const on = (sel, fn) => app.querySelectorAll(sel).forEach((b) => (b.onclick = () => fn(b)));
   on("[data-approve]", (b) => guard(() => approveEntry(b.dataset.approve)));
+  on("[data-give-extra]", (b) => {
+    const e = S.log.find((x) => x.id === b.dataset.giveExtra);
+    openForm(`Pontos para "${e.title}"`, `<p class="small muted">${esc(kidName(e.kidId))}${e.suggested ? ` pediu ${e.suggested} pontos` : " não sugeriu pontos"}.</p>
+      <label>Quantos pontos vale?</label><input name="points" type="number" inputmode="numeric" min="1" required value="${e.suggested ?? ""}">`,
+    async (fd) => { await approveEntry(e.id, readPoints(fd.get("points"))); toast("Pontos dados! 🌟"); }, "Dar pontos");
+  });
   on("[data-reject]", (b) => guard(() => rejectEntry(b.dataset.reject)));
   on("[data-approve-all]", (b) => guard(async () => {
     const ids = S.log.filter((e) => e.status === "pending" && e.type === "task" && e.kidId === b.dataset.approveAll).map((e) => e.id);
