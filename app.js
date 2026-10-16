@@ -459,6 +459,82 @@ async function adjustPoints(kidId, points, title) {
   });
 }
 
+// ---------- Gráfico semanal ----------
+/** Pontos ganhos e perdidos por dia (só registos aprovados; os prémios trocados não contam). */
+function dailyPoints(kidId, days) {
+  const map = Object.fromEntries(days.map((d) => [d, { gain: 0, loss: 0 }]));
+  for (const e of S.log) {
+    if (e.kidId !== kidId || e.status !== "approved" || e.type === "reward" || !map[e.date]) continue;
+    const v = e.applied ?? e.points;
+    if (v >= 0) map[e.date].gain += v; else map[e.date].loss -= v;
+  }
+  return map;
+}
+
+/** Barra com a ponta arredondada (4px) e quadrada junto à linha do zero. */
+function barPath(x, y, w, h, up) {
+  if (h <= 0) return "";
+  const r = Math.min(4, h, w / 2);
+  return up
+    ? `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`
+    : `M${x},${y}V${y + h - r}Q${x},${y + h} ${x + r},${y + h}H${x + w - r}Q${x + w},${y + h} ${x + w},${y + h - r}V${y}Z`;
+}
+
+function weekChart(kid) {
+  const days = Array.from({ length: 7 }, (_, i) => addDays(today(), i - 6));
+  const prevDays = Array.from({ length: 7 }, (_, i) => addDays(today(), i - 13));
+  const cur = dailyPoints(kid.id, days), prev = dailyPoints(kid.id, prevDays);
+  const net = (m) => Object.values(m).reduce((s, v) => s + v.gain - v.loss, 0);
+  const week = net(cur), last = net(prev), diff = week - last;
+  const maxG = Math.max(10, ...days.map((d) => cur[d].gain));
+  const maxL = Math.max(0, ...days.map((d) => cur[d].loss));
+  const W = 308, top = 14, labelH = 20, plotH = maxL ? 120 : 96, H = top + plotH + labelH;
+  const k = plotH / (maxG + maxL), zeroY = top + maxG * k;
+  const slot = W / 7, bw = Math.min(24, slot * 0.55);
+  const fmt = (n) => (n > 0 ? `+${n}` : `${n}`);
+  const cols = days.map((d, i) => {
+    const { gain, loss } = cur[d];
+    const x = i * slot + (slot - bw) / 2;
+    const gh = gain * k, lh = loss * k;
+    const label = d === today() ? "Hoje" : weekday(d);
+    return `<g>
+      <path class="bar-gain" d="${barPath(x, zeroY - gh - 1, bw, gh, true)}"/>
+      <path class="bar-loss" d="${barPath(x, zeroY + 1, bw, lh, false)}"/>
+      <text x="${i * slot + slot / 2}" y="${H - 5}" text-anchor="middle" class="axis${d === today() ? " now" : ""}">${label}</text>
+      <rect class="hit" x="${i * slot}" y="0" width="${slot}" height="${H}" data-chart-day data-kid="${kid.id}"
+        data-text="${esc(`${dayLabel(d)}: ${gain ? `+${gain} ganhos` : "nada ganho"}${loss ? ` · −${loss} perdidos` : ""}`)}"/>
+    </g>`;
+  }).join("");
+  const summary = `Últimos 7 dias: ${fmt(week)} pontos. ${days.map((d) => `${dayLabel(d)} +${cur[d].gain}${cur[d].loss ? ` −${cur[d].loss}` : ""}`).join(", ")}.`;
+  return `<div class="chart">
+    <div class="row spread wrap">
+      <div><b>Últimos 7 dias: ${fmt(week)}</b>
+        <div class="small muted">${diff === 0 ? "Igual aos 7 dias anteriores" : `${diff > 0 ? "▲" : "▼"} ${Math.abs(diff)} vs. 7 dias anteriores (${fmt(last)})`}</div></div>
+      <div class="legend small"><span><i class="sw gain"></i>Ganhos</span><span><i class="sw loss"></i>Perdidos</span></div>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(summary)}">
+      <line class="grid" x1="0" x2="${W}" y1="${top}" y2="${top}"/>
+      <text class="axis" x="0" y="${top - 4}">${maxG}</text>
+      ${cols}
+      <line class="base" x1="0" x2="${W}" y1="${zeroY}" y2="${zeroY}"/>
+    </svg>
+    <div class="small muted chart-cap" id="cap-${kid.id}">Toca numa barra para ver o dia.</div>
+  </div>`;
+}
+
+function bindCharts() {
+  app.querySelectorAll("[data-chart-day]").forEach((el) => {
+    const show = () => {
+      const cap = document.getElementById(`cap-${el.dataset.kid}`);
+      if (cap) cap.textContent = el.dataset.text;
+      el.closest("svg").querySelectorAll(".hit.on").forEach((h) => h.classList.remove("on"));
+      el.classList.add("on");
+    };
+    el.addEventListener("click", show);
+    el.addEventListener("mouseenter", show);
+  });
+}
+
 function historyItem(e, showKid) {
   const icon = { task: "✅", reward: "🎁", penalty: "⚠️", bonus: "🌟" }[e.type] || "•";
   const floorNote = e.status === "approved" && e.applied !== undefined && e.applied !== e.points
@@ -483,7 +559,8 @@ function renderKid(kid) {
   if (S.tab === "rewards") body = kidRewards(kid);
   if (S.tab === "history") {
     const items = S.log.filter((e) => e.kidId === kid.id);
-    body = items.length ? items.map((e) => historyItem(e, false)).join("") : `<div class="empty">Ainda não há nada no histórico.</div>`;
+    body = `<h2>A minha semana</h2>${weekChart(kid)}<h2>Histórico</h2>`
+      + (items.length ? items.map((e) => historyItem(e, false)).join("") : `<div class="empty">Ainda não há nada no histórico.</div>`);
   }
   const pending = S.log.filter((e) => e.kidId === kid.id && e.type === "task" && e.status === "pending")
     .reduce((s, e) => s + e.points, 0);
@@ -493,6 +570,7 @@ function renderKid(kid) {
   document.getElementById("switch").onclick = () => setRole(null);
   bindTabs();
   bindKidActions(kid);
+  bindCharts();
 }
 
 /** Dias que o filho pode marcar, do mais recente para o mais antigo. */
@@ -614,6 +692,7 @@ function renderParent() {
   document.getElementById("settings").onclick = openSettings;
   bindTabs();
   bindParentActions();
+  bindCharts();
 }
 
 function parentValidate() {
@@ -648,6 +727,7 @@ function parentKids() {
       <div class="row"><div style="font-size:2rem">${esc(k.emoji)}</div>
         <div class="grow"><h3>${esc(k.name)}</h3><div class="muted small">${pendingRewardCost(k.id) ? `${pendingRewardCost(k.id)} pts em pedidos de prémio` : ""}</div></div>
         <div class="pts" style="font-size:1.4rem">⭐ ${k.points || 0}</div></div>
+      ${weekChart(k)}
       <div class="row wrap" style="margin-top:10px">
         <button class="bad" data-penalty="${k.id}">− Mau comportamento</button>
         <button class="good" data-bonus="${k.id}">+ Bónus</button>
@@ -795,8 +875,9 @@ function ideasForm(kind) {
     .map((x) => x.title.trim().toLowerCase()));
   const ideas = (isTasks ? TASK_IDEAS : REWARD_IDEAS).filter(([title]) => !existing.has(title.toLowerCase()));
   if (!ideas.length) { toast("Já adicionaste todas as ideias."); return; }
-  openForm(isTasks ? "Ideias de tarefas recorrentes" : "Ideias de prémios", `
+  const form = openForm(isTasks ? "Ideias de tarefas recorrentes" : "Ideias de prémios", `
     <p class="small muted">Escolhe as que queres e ajusta os pontos. ${isTasks ? "Ficam como recorrentes, para todos os filhos." : ""}</p>
+    <label class="inline" style="font-weight:600"><input type="checkbox" id="pickAll"> Selecionar todas</label>
     ${ideas.map(([title, pts], i) => `<div class="row" style="margin:6px 0">
       <label class="inline grow" style="margin:0"><input type="checkbox" name="pick" value="${i}"> ${esc(title)}</label>
       <input name="pts${i}" type="number" inputmode="numeric" min="1" value="${pts}" style="width:80px">
@@ -815,6 +896,8 @@ function ideasForm(kind) {
     await batch.commit();
     toast(`${picked.length} ${isTasks ? "tarefa(s)" : "prémio(s)"} adicionado(s).`);
   }, "Adicionar");
+  const all = form.querySelector("#pickAll");
+  all.onchange = () => form.querySelectorAll("[name=pick]").forEach((c) => (c.checked = all.checked));
 }
 
 function rewardForm(reward) {

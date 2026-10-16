@@ -172,3 +172,23 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-weight:
 .day.active { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
 .day .dot { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--warn-bg); color: var(--warn); font-size: .72rem; text-align: center; }
 .day.active .dot { background: var(--primary-text); color: var(--primary); }
+
+/* Gráfico semanal */
+:root { --gain: #2b7fd6; --loss: #e8590c; --grid: #e6e3ef; }
+@media (prefers-color-scheme: dark) { :root { --gain: #4a86e0; --loss: #e0703a; --grid: #322d48; } }
+.chart { margin-top: 12px; }
+.chart svg { width: 100%; height: auto; display: block; margin-top: 8px; overflow: visible; }
+.chart .bar-gain { fill: var(--gain); }
+.chart .bar-loss { fill: var(--loss); }
+.chart .grid { stroke: var(--grid); stroke-width: 1; }
+.chart .base { stroke: var(--muted); stroke-width: 1; opacity: .5; }
+.chart .axis { fill: var(--muted); font-size: 11px; }
+.chart .axis.now { fill: var(--text); font-weight: 700; }
+.chart .hit { fill: transparent; cursor: pointer; }
+.chart .hit.on, .chart .hit:hover { fill: var(--text); fill-opacity: .05; }
+.chart-cap { min-height: 1.3em; margin-top: 4px; }
+.legend { display: flex; gap: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.sw.gain { background: var(--gain); }
+.sw.loss { background: var(--loss); }
