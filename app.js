@@ -137,7 +137,14 @@ function openForm(title, bodyHtml, onSubmit, submitLabel = "Guardar") {
   };
   return form;
 }
-modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+// Fecha ao tocar fora da janela, mas só se o toque também começou fora. No telemóvel, o teclado
+// a abrir desloca a janela e o "click" de um toque num campo pode cair no fundo escurecido.
+let downOnBackdrop = false;
+modal.addEventListener("pointerdown", (e) => { downOnBackdrop = e.target === modal; });
+modal.addEventListener("click", (e) => {
+  if (e.target === modal && downOnBackdrop && !modal.contains(document.activeElement)) closeModal();
+  downOnBackdrop = false;
+});
 
 function askPin(title, check) {
   openForm(title, `<input name="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="6" placeholder="PIN" style="font-size:1.6rem;text-align:center;letter-spacing:.4em">`,
