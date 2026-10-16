@@ -381,12 +381,35 @@ function bindTabs() {
 }
 
 // ---------- Regras de negócio ----------
-function tasksFor(kidId, date) {
-  const dow = new Date(date + "T12:00:00").getDay();
-  return S.tasks.filter((t) => t.active !== false
-    && (t.recurring ? (!t.days?.length || t.days.includes(dow)) : t.date === date)
-    && (!t.kidIds?.length || t.kidIds.includes(kidId)));
+/**
+ * Tarefas de um filho. Há dois tipos e ambos aparecem todos os dias:
+ * recorrentes (para fazer sempre) e espontâneas (pontos extra quando acontecem).
+ * Tarefas antigas "só um dia" passam a contar como espontâneas.
+ */
+function tasksFor(kidId) {
+  return S.tasks.filter((t) => t.active !== false && (!t.kidIds?.length || t.kidIds.includes(kidId)));
 }
+const isRecurring = (t) => !!t.recurring;
+
+// Ideias para começar (o pai/mãe escolhe quais quer adicionar).
+const TASK_IDEAS = [
+  ["Fazer a cama", 5], ["Arrumar o quarto", 10], ["Lavar os dentes (manhã e noite)", 5],
+  ["Vestir-se sozinho(a)", 3], ["Preparar a mochila para o dia seguinte", 5], ["Fazer os trabalhos de casa", 10],
+  ["Ler 20 minutos", 10], ["Pôr a mesa", 5], ["Levantar a mesa", 5], ["Pôr a roupa suja no cesto", 3],
+  ["Arrumar os brinquedos", 5], ["Tomar banho sem reclamar", 5], ["Comer a fruta e os legumes", 5],
+  ["Dar comida e água ao animal", 5], ["Ir para a cama à hora combinada", 5], ["Arrumar sapatos e casaco ao chegar", 3],
+  ["Levar o lixo ou a reciclagem", 5], ["Praticar instrumento ou desporto (15 min)", 10],
+  ["Ajudar a arrumar a loiça", 5], ["Cumprir o limite de tempo de ecrã", 10],
+];
+const REWARD_IDEAS = [
+  ["Escolher a sobremesa do jantar", 30], ["15 minutos extra de ecrã", 30], ["Escolher o filme da noite em família", 50],
+  ["Deitar 30 min mais tarde (fim de semana)", 60], ["Gelado ou doce ao fim de semana", 60], ["Escolher o jantar de um dia", 80],
+  ["Vale \"hoje não faço uma tarefa\"", 80], ["Pequeno-almoço na cama", 100], ["Noite de jogos de tabuleiro (escolhe o jogo)", 100],
+  ["1 hora extra de consola ao fim de semana", 120], ["Convidar um amigo para brincar cá em casa", 150],
+  ["Ir ao parque ou à praia à escolha", 150], ["Um livro novo", 250], ["Acampar na sala / dormida com amigo", 300],
+  ["Uma tarde a sós com o pai ou a mãe", 300], ["Ida ao cinema", 400], ["Escolher o programa do fim de semana", 400],
+  ["Brinquedo ou jogo até 15 €", 600], ["Ida ao zoo, aquário ou parque de diversões", 1000], ["Prenda maior à escolha (até 40 €)", 1500],
+];
 
 /** Registo mais recente de uma tarefa para um filho num dia. */
 const taskEntry = (kidId, taskId, date) =>
@@ -476,7 +499,8 @@ function renderKid(kid) {
 const markableDays = () => Array.from({ length: backDays() + 1 }, (_, i) => addDays(today(), -i));
 
 /** Tarefas do dia ainda por marcar. */
-const unmarkedCount = (kidId, date) => tasksFor(kidId, date).filter((t) => !taskEntry(kidId, t.id, date)).length;
+/** Tarefas recorrentes do dia ainda por marcar. */
+const unmarkedCount = (kidId, date) => tasksFor(kidId).filter((t) => isRecurring(t) && !taskEntry(kidId, t.id, date)).length;
 
 function kidToday(kid) {
   const days = markableDays();
@@ -487,18 +511,25 @@ function kidToday(kid) {
     const left = unmarkedCount(kid.id, d);
     return `<button class="day ${d === date ? "active" : ""}" data-day="${d}">${dayLabel(d)}${left ? ` <span class="dot">${left}</span>` : ""}</button>`;
   }).join("")}</div>` : "";
-  const tasks = tasksFor(kid.id, date);
+  const tasks = tasksFor(kid.id);
   const isToday = date === today();
-  if (!tasks.length) return strip + `<div class="empty">Não há tarefas ${isToday ? "para hoje" : "neste dia"}. 🎉</div>`;
-  return strip + `<p class="muted">Toca nas tarefas que fizeste ${isToday ? "hoje" : date === addDays(today(), -1) ? "ontem" : `em ${dayLabel(date)}`}. O pai/mãe depois valida.</p>` + tasks.map((t) => {
-    const e = taskEntry(kid.id, t.id, date);
-    const st = e?.status || "";
-    const mark = { pending: "⏳", approved: "✓", rejected: "✕" }[st] || "";
-    return `<button class="task ${st}" data-task="${t.id}">
-      <span class="check">${mark}</span>
-      <span class="grow"><b>${esc(t.title)}</b>${st ? `<br><span class="small muted">${STATUS_LABEL[st]}${st === "pending" ? " · toca para desmarcar" : ""}</span>` : ""}</span>
-      ${ptsHtml(t.points)}</button>`;
-  }).join("");
+  if (!tasks.length) return strip + `<div class="empty">Ainda não há tarefas. 🎉</div>`;
+  const rec = tasks.filter(isRecurring), extra = tasks.filter((t) => !isRecurring(t));
+  const done = rec.filter((t) => taskEntry(kid.id, t.id, date)).length;
+  const when = isToday ? "hoje" : date === addDays(today(), -1) ? "ontem" : `em ${dayLabel(date)}`;
+  return strip + `<p class="muted">Toca nas tarefas que fizeste ${when}. O pai/mãe depois valida.</p>`
+    + (rec.length ? `<h2>📅 Todos os dias <span class="muted small">· ${done}/${rec.length} feitas</span></h2>${rec.map((t) => taskButton(kid, t, date)).join("")}` : "")
+    + (extra.length ? `<h2>✨ Espontâneas</h2><p class="small muted">Fizeste alguma destas? Ganha pontos extra!</p>${extra.map((t) => taskButton(kid, t, date)).join("")}` : "");
+}
+
+function taskButton(kid, t, date) {
+  const e = taskEntry(kid.id, t.id, date);
+  const st = e?.status || "";
+  const mark = { pending: "⏳", approved: "✓", rejected: "✕" }[st] || "";
+  return `<button class="task ${st}" data-task="${t.id}">
+    <span class="check">${mark}</span>
+    <span class="grow"><b>${esc(t.title)}</b>${st ? `<br><span class="small muted">${STATUS_LABEL[st]}${st === "pending" ? " · toca para desmarcar" : ""}</span>` : ""}</span>
+    ${ptsHtml(t.points)}</button>`;
 }
 
 function kidRewards(kid) {
@@ -627,21 +658,20 @@ function parentKids() {
 
 function parentTasks() {
   const active = S.tasks.filter((t) => t.active !== false);
-  const desc = (t) => {
-    const when = t.recurring ? (t.days?.length && t.days.length < 7 ? t.days.map((d) => DAYS[d]).join(", ") : "Todos os dias") : `Só em ${fmtDate(t.date)}`;
-    const who = t.kidIds?.length ? t.kidIds.map(kidName).join(", ") : "Todos";
-    return `${when} · ${who}`;
-  };
-  return `<button class="primary block" id="addTask" style="margin-bottom:12px">+ Nova tarefa</button>`
-    + (active.length ? active.map((t) => `<div class="card row">
-      <div class="grow"><b>${esc(t.title)}</b><div class="small muted">${esc(desc(t))}</div></div>
-      ${ptsHtml(t.points)}<button data-edit-task="${t.id}">Editar</button></div>`).join("")
-      : `<div class="empty">Cria a primeira tarefa — por exemplo "Fazer a cama", 5 pontos, todos os dias.</div>`);
+  const row = (t) => `<div class="card row">
+      <div class="grow"><b>${esc(t.title)}</b><div class="small muted">${esc(t.kidIds?.length ? t.kidIds.map(kidName).join(", ") : "Todos os filhos")}</div></div>
+      ${ptsHtml(t.points)}<button data-edit-task="${t.id}">Editar</button></div>`;
+  const rec = active.filter(isRecurring), extra = active.filter((t) => !isRecurring(t));
+  return `<button class="block" id="taskIdeas" style="margin-bottom:4px">💡 Ideias de tarefas</button>
+    <div class="row spread"><h2>📅 Recorrentes <span class="muted small">· todos os dias</span></h2><button class="primary" data-add-task="rec">+ Nova</button></div>
+    ${rec.length ? rec.map(row).join("") : `<div class="empty">Tarefas para fazer sempre, como "Fazer a cama".</div>`}
+    <div class="row spread"><h2>✨ Espontâneas <span class="muted small">· quando acontecem</span></h2><button class="primary" data-add-task="extra">+ Nova</button></div>
+    ${extra.length ? extra.map(row).join("") : `<div class="empty">Pontos extra para coisas que não são diárias, como "Ajudar a lavar o carro".</div>`}`;
 }
 
 function parentRewards() {
   const active = S.rewards.filter((r) => r.status === "active");
-  return `<button class="primary block" id="addReward" style="margin-bottom:12px">+ Novo prémio</button>`
+  return `<div class="row" style="margin-bottom:12px"><button class="grow" id="rewardIdeas">💡 Ideias</button><button class="primary grow" id="addReward">+ Novo prémio</button></div>`
     + (active.length ? active.map((r) => `<div class="card row">
       <div class="grow"><b>${esc(r.title)}</b>${r.suggestedBy ? `<div class="small muted">Sugerido por ${esc(kidName(r.suggestedBy))}</div>` : ""}</div>
       <span class="pts">⭐ ${r.cost}</span><button data-edit-reward="${r.id}">Editar</button></div>`).join("")
@@ -670,7 +700,9 @@ function bindParentActions() {
   on("[data-edit-task]", (b) => taskForm(S.tasks.find((t) => t.id === b.dataset.editTask)));
   on("[data-edit-reward]", (b) => rewardForm(S.rewards.find((r) => r.id === b.dataset.editReward)));
   on("#addKid", () => kidForm(null));
-  on("#addTask", () => taskForm(null));
+  on("[data-add-task]", (b) => taskForm(null, b.dataset.addTask === "rec"));
+  on("#taskIdeas", () => ideasForm("tasks"));
+  on("#rewardIdeas", () => ideasForm("rewards"));
   on("#addReward", () => rewardForm(null));
 }
 
@@ -720,17 +752,14 @@ function kidForm(kid) {
   });
 }
 
-function taskForm(task) {
-  const recurring = task ? !!task.recurring : true;
-  const days = task?.days?.length ? task.days : [0, 1, 2, 3, 4, 5, 6];
+function taskForm(task, recurringDefault = true) {
+  const recurring = task ? isRecurring(task) : recurringDefault;
   const form = openForm(task ? "Editar tarefa" : "Nova tarefa", `
-    <label>Tarefa</label><input name="title" required maxlength="80" value="${esc(task?.title || "")}" placeholder="Ex: Fazer a cama">
+    <label>Tarefa</label><input name="title" required maxlength="80" value="${esc(task?.title || "")}" placeholder="${recurring ? "Ex: Fazer a cama" : "Ex: Ajudar a lavar o carro"}">
     <label>Pontos</label><input name="points" type="number" inputmode="numeric" min="1" required value="${task?.points ?? ""}">
-    <label>Quando</label>
-    <label class="inline"><input type="radio" name="kind" value="rec" ${recurring ? "checked" : ""}> Repete</label>
-    <label class="inline"><input type="radio" name="kind" value="once" ${recurring ? "" : "checked"}> Só um dia</label>
-    <div id="recBox">${DAYS.map((d, i) => `<label class="inline"><input type="checkbox" name="days" value="${i}" ${days.includes(i) ? "checked" : ""}> ${d}</label>`).join("")}</div>
-    <div id="onceBox"><input name="date" type="date" value="${task?.date || today()}"></div>
+    <label>Tipo</label>
+    <label class="inline"><input type="radio" name="kind" value="rec" ${recurring ? "checked" : ""}> 📅 Recorrente (todos os dias)</label>
+    <label class="inline"><input type="radio" name="kind" value="extra" ${recurring ? "" : "checked"}> ✨ Espontânea (quando acontece)</label>
     <label>Para quem</label>
     ${S.kids.length ? S.kids.map((k) => `<label class="inline"><input type="checkbox" name="kids" value="${k.id}" ${!task?.kidIds?.length || task.kidIds.includes(k.id) ? "checked" : ""}> ${esc(k.emoji)} ${esc(k.name)}</label>`).join("") : `<p class="small muted">Todos os filhos.</p>`}
     ${task ? `<button type="button" class="bad" id="delTask" style="margin-top:16px">Apagar tarefa</button>` : ""}`,
@@ -738,15 +767,11 @@ function taskForm(task) {
     const title = fd.get("title").trim();
     if (!title) throw new Error("Escreve o nome da tarefa.");
     const isRec = fd.get("kind") === "rec";
-    const selDays = fd.getAll("days").map(Number);
-    if (isRec && !selDays.length) throw new Error("Escolhe pelo menos um dia.");
-    if (!isRec && !fd.get("date")) throw new Error("Escolhe o dia.");
     const selKids = fd.getAll("kids");
     if (S.kids.length && !selKids.length) throw new Error("Escolhe pelo menos um filho.");
     const data = {
       title, points: readPoints(fd.get("points")), recurring: isRec,
-      days: isRec && selDays.length < 7 ? selDays : [],
-      date: isRec ? null : fd.get("date"),
+      days: [], date: null,
       // Lista vazia = todos os filhos (incluindo os que forem adicionados depois).
       kidIds: selKids.length === S.kids.length ? [] : selKids,
       active: true,
@@ -754,13 +779,6 @@ function taskForm(task) {
     if (task) await updateDoc(doc(col("tasks"), task.id), data);
     else await addDoc(col("tasks"), { ...data, createdAt: serverTimestamp() });
   });
-  const sync = () => {
-    const rec = form.querySelector("[name=kind]:checked").value === "rec";
-    form.querySelector("#recBox").classList.toggle("hidden", !rec);
-    form.querySelector("#onceBox").classList.toggle("hidden", rec);
-  };
-  form.querySelectorAll("[name=kind]").forEach((r) => (r.onchange = sync));
-  sync();
   const del = form.querySelector("#delTask");
   // Arquivar em vez de apagar mantém o histórico coerente.
   if (del) del.onclick = () => guard(async () => {
@@ -768,6 +786,35 @@ function taskForm(task) {
     await updateDoc(doc(col("tasks"), task.id), { active: false });
     closeModal();
   });
+}
+
+/** Lista de ideias para escolher e adicionar de uma vez (os pontos podem ser ajustados antes). */
+function ideasForm(kind) {
+  const isTasks = kind === "tasks";
+  const existing = new Set((isTasks ? S.tasks.filter((t) => t.active !== false) : S.rewards.filter((r) => r.status === "active"))
+    .map((x) => x.title.trim().toLowerCase()));
+  const ideas = (isTasks ? TASK_IDEAS : REWARD_IDEAS).filter(([title]) => !existing.has(title.toLowerCase()));
+  if (!ideas.length) { toast("Já adicionaste todas as ideias."); return; }
+  openForm(isTasks ? "Ideias de tarefas recorrentes" : "Ideias de prémios", `
+    <p class="small muted">Escolhe as que queres e ajusta os pontos. ${isTasks ? "Ficam como recorrentes, para todos os filhos." : ""}</p>
+    ${ideas.map(([title, pts], i) => `<div class="row" style="margin:6px 0">
+      <label class="inline grow" style="margin:0"><input type="checkbox" name="pick" value="${i}"> ${esc(title)}</label>
+      <input name="pts${i}" type="number" inputmode="numeric" min="1" value="${pts}" style="width:80px">
+    </div>`).join("")}`,
+  async (fd) => {
+    const picked = fd.getAll("pick").map(Number);
+    if (!picked.length) throw new Error("Escolhe pelo menos uma.");
+    const batch = writeBatch(db);
+    for (const i of picked) {
+      const pts = readPoints(fd.get(`pts${i}`));
+      const title = ideas[i][0];
+      batch.set(doc(col(isTasks ? "tasks" : "rewards")), isTasks
+        ? { title, points: pts, recurring: true, days: [], date: null, kidIds: [], active: true, createdAt: serverTimestamp() }
+        : { title, cost: pts, status: "active", suggestedBy: null, createdAt: serverTimestamp() });
+    }
+    await batch.commit();
+    toast(`${picked.length} ${isTasks ? "tarefa(s)" : "prémio(s)"} adicionado(s).`);
+  }, "Adicionar");
 }
 
 function rewardForm(reward) {
