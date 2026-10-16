@@ -593,6 +593,38 @@ function weekChart(kid) {
   </div>`;
 }
 
+/** Pontos líquidos (ganhos − perdidos) de um filho nos últimos 7 dias. */
+function weekNet(kidId) {
+  const days = Array.from({ length: 7 }, (_, i) => addDays(today(), i - 6));
+  return Object.values(dailyPoints(kidId, days)).reduce((s, v) => s + v.gain - v.loss, 0);
+}
+
+/**
+ * Comparação dos irmãos nos últimos 7 dias. Com `me`, diz a esse filho quantos pontos
+ * está acima ou abaixo de cada irmão.
+ */
+function siblingsSummary(me = null) {
+  if (S.kids.length < 2) return "";
+  const rows = S.kids.map((k) => ({ k, net: weekNet(k.id) })).sort((a, b) => b.net - a.net || a.k.name.localeCompare(b.k.name, "pt"));
+  const max = Math.max(1, ...rows.map((r) => Math.abs(r.net)));
+  const fmt = (n) => (n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : "0");
+  const myNet = me ? weekNet(me.id) : 0;
+  const compare = (r) => {
+    if (!me || r.k.id === me.id) return "";
+    const d = myNet - r.net;
+    return `<div class="small muted">${d === 0 ? `Estás empatado com ${esc(r.k.name)}` : `Estás <b>${d > 0 ? "▲" : "▼"} ${Math.abs(d)} pontos ${d > 0 ? "acima" : "abaixo"}</b> d${/a$/i.test(r.k.name) ? "a" : "o"} ${esc(r.k.name)}`}</div>`;
+  };
+  return `<div class="card sibs">
+    <div class="small muted" style="margin-bottom:8px">Pontos ganhos menos perdidos nos últimos 7 dias</div>
+    ${rows.map((r) => `<div class="sib ${me && r.k.id === me.id ? "me" : ""}">
+      <div class="row">${avatar(r.k, "sm")}
+        <div class="grow"><b>${esc(r.k.name)}${me && r.k.id === me.id ? " (tu)" : ""}</b>${compare(r)}</div>
+        <span class="pts">${fmt(r.net)}</span></div>
+      <div class="sib-track"><i class="${r.net < 0 ? "neg" : ""}" style="width:${Math.round((Math.abs(r.net) / max) * 100)}%"></i></div>
+    </div>`).join("")}
+  </div>`;
+}
+
 function bindCharts() {
   app.querySelectorAll("[data-chart-day]").forEach((el) => {
     const show = () => {
@@ -630,7 +662,7 @@ function renderKid(kid) {
   if (S.tab === "rewards") body = kidRewards(kid);
   if (S.tab === "history") {
     const items = S.log.filter((e) => e.kidId === kid.id);
-    body = `<h2>A minha semana</h2>${weekChart(kid)}<h2>Histórico</h2>`
+    body = `${S.kids.length > 1 ? `<h2>Eu e ${S.kids.length > 2 ? "os meus irmãos" : "o meu irmão"}</h2>${siblingsSummary(kid)}` : ""}<h2>A minha semana</h2>${weekChart(kid)}<h2>Histórico</h2>`
       + (items.length ? items.map((e) => historyItem(e, false)).join("") : `<div class="empty">Ainda não há nada no histórico.</div>`);
   }
   const pending = S.log.filter((e) => e.kidId === kid.id && e.type === "task" && e.status === "pending")
@@ -796,7 +828,8 @@ function parentValidate() {
 }
 
 function parentKids() {
-  return (S.kids.length ? S.kids.map((k) => `<div class="card">
+  return (S.kids.length > 1 ? `<h2 style="margin-top:0">Comparação</h2>${siblingsSummary()}` : "")
+    + (S.kids.length ? S.kids.map((k) => `<div class="card">
       <div class="row">${avatar(k, "md")}
         <div class="grow"><h3>${esc(k.name)}</h3><div class="muted small">${pendingRewardCost(k.id) ? `${pendingRewardCost(k.id)} pts em pedidos de prémio` : ""}</div></div>
         <div class="pts" style="font-size:1.4rem">⭐ ${k.points || 0}</div></div>
