@@ -28,7 +28,7 @@ Tudo gratuito: o código é servido pelo GitHub Pages e os dados ficam no Fireba
 ## Limitações a saber
 
 - **Os PINs protegem o ecrã, não o servidor.** Todos os aparelhos usam a mesma conta da família, por isso alguém com conhecimentos técnicos e acesso à conta poderia alterar dados sem passar pela app. Para crianças chega. Se um dia não chegar, o passo seguinte é dar uma conta Firebase a cada filho e tornar as regras mais restritivas.
-- As tarefas só podem ser marcadas no próprio dia. O pai/mãe pode validá-las mais tarde.
+- Os filhos podem marcar tarefas dos últimos 3 dias (o pai/mãe muda isto em ⚙️ Definições, de 0 a 14 dias). O pai/mãe valida quando quiser.
 - O histórico mostra os últimos 500 registos.
 
 ## Testes locais (opcional)

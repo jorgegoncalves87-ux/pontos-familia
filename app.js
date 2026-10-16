@@ -34,6 +34,7 @@ const S = {
   kidsLoaded: false,
   role: null, // "parent" | id do filho
   tab: null,
+  kidDate: null, // dia escolhido pelo filho para marcar tarefas
   unsub: [],
 };
 
@@ -51,6 +52,14 @@ const pad = (n) => String(n).padStart(2, "0");
 const dateStr = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const today = () => dateStr();
 const fmtDate = (s) => { const [y, m, d] = s.split("-"); return `${d}/${m}`; };
+const addDays = (s, n) => { const [y, m, d] = s.split("-").map(Number); return dateStr(new Date(y, m - 1, d + n)); };
+const weekday = (s) => DAYS[new Date(s + "T12:00:00").getDay()];
+/** "Hoje", "Ontem" ou "Qua 14/10". */
+const dayLabel = (s) => (s === today() ? "Hoje" : s === addDays(today(), -1) ? "Ontem" : `${weekday(s)} ${fmtDate(s)}`);
+const DEFAULT_BACK_DAYS = 3;
+const MAX_BACK_DAYS = 14;
+/** Quantos dias para trás os filhos podem marcar tarefas (definido pelo pai/mãe). */
+const backDays = () => Math.min(MAX_BACK_DAYS, Math.max(0, S.fam?.maxBackDays ?? DEFAULT_BACK_DAYS));
 const ptsHtml = (n) => `<span class="pts ${n >= 0 ? "plus" : "minus"}">${n > 0 ? "+" : ""}${n}</span>`;
 const kidById = (id) => S.kids.find((k) => k.id === id);
 const kidName = (id) => { const k = kidById(id); return k ? `${k.emoji} ${k.name}` : "?"; };
@@ -142,6 +151,7 @@ const roleKey = () => `pf-role-${S.user.uid}`;
 function setRole(role) {
   S.role = role;
   S.tab = null;
+  S.kidDate = null;
   // Só o perfil de filho fica lembrado no aparelho; o modo pai exige sempre o PIN.
   try { role && role !== "parent" ? localStorage.setItem(roleKey(), role) : localStorage.removeItem(roleKey()); } catch {}
   render();
@@ -367,7 +377,7 @@ function historyItem(e, showKid) {
 // ---------- Vista do filho ----------
 function renderKid(kid) {
   const tabs = [
-    { id: "today", icon: "📋", label: "Hoje" },
+    { id: "today", icon: "📋", label: "Tarefas" },
     { id: "rewards", icon: "🎁", label: "Prémios" },
     { id: "history", icon: "📜", label: "Histórico" },
   ];
@@ -389,11 +399,25 @@ function renderKid(kid) {
   bindKidActions(kid);
 }
 
+/** Dias que o filho pode marcar, do mais recente para o mais antigo. */
+const markableDays = () => Array.from({ length: backDays() + 1 }, (_, i) => addDays(today(), -i));
+
+/** Tarefas do dia ainda por marcar. */
+const unmarkedCount = (kidId, date) => tasksFor(kidId, date).filter((t) => !taskEntry(kidId, t.id, date)).length;
+
 function kidToday(kid) {
-  const date = today();
+  const days = markableDays();
+  // Volta a hoje se o dia escolhido saiu da janela (mudou o dia ou o pai/mãe reduziu o limite).
+  if (!days.includes(S.kidDate)) S.kidDate = today();
+  const date = S.kidDate;
+  const strip = days.length > 1 ? `<div class="days">${days.map((d) => {
+    const left = unmarkedCount(kid.id, d);
+    return `<button class="day ${d === date ? "active" : ""}" data-day="${d}">${dayLabel(d)}${left ? ` <span class="dot">${left}</span>` : ""}</button>`;
+  }).join("")}</div>` : "";
   const tasks = tasksFor(kid.id, date);
-  if (!tasks.length) return `<div class="empty">Não há tarefas para hoje. 🎉</div>`;
-  return `<p class="muted">Toca nas tarefas que fizeste hoje. O pai/mãe depois valida.</p>` + tasks.map((t) => {
+  const isToday = date === today();
+  if (!tasks.length) return strip + `<div class="empty">Não há tarefas ${isToday ? "para hoje" : "neste dia"}. 🎉</div>`;
+  return strip + `<p class="muted">Toca nas tarefas que fizeste ${isToday ? "hoje" : date === addDays(today(), -1) ? "ontem" : `em ${dayLabel(date)}`}. O pai/mãe depois valida.</p>` + tasks.map((t) => {
     const e = taskEntry(kid.id, t.id, date);
     const st = e?.status || "";
     const mark = { pending: "⏳", approved: "✓", rejected: "✕" }[st] || "";
@@ -426,9 +450,11 @@ function kidRewards(kid) {
 }
 
 function bindKidActions(kid) {
+  app.querySelectorAll("[data-day]").forEach((b) => (b.onclick = () => { S.kidDate = b.dataset.day; render(); }));
   app.querySelectorAll("[data-task]").forEach((b) => (b.onclick = () => guard(async () => {
     const t = S.tasks.find((x) => x.id === b.dataset.task);
-    const date = today();
+    const date = S.kidDate || today();
+    if (!markableDays().includes(date)) throw new Error("Já não dá para marcar tarefas deste dia.");
     const e = taskEntry(kid.id, t.id, date);
     if (!e) {
       await addDoc(col("log"), {
@@ -439,7 +465,7 @@ function bindKidActions(kid) {
     } else if (e.status === "pending") {
       await deleteDoc(doc(col("log"), e.id));
     } else {
-      toast(e.status === "approved" ? "Esta já está aprovada. 👍" : "Esta foi rejeitada hoje.");
+      toast(e.status === "approved" ? "Esta já está aprovada. 👍" : "Esta foi rejeitada.");
     }
   })));
   app.querySelectorAll("[data-claim]").forEach((b) => (b.onclick = () => guard(async () => {
@@ -499,7 +525,7 @@ function parentValidate() {
       ${taskCount > 1 ? `<button class="good" data-approve-all="${kid.id}">Aprovar tarefas (${taskCount})</button>` : ""}</div>`;
     html += items.map((e) => `<div class="card row wrap">
       <div style="font-size:1.3rem">${e.type === "reward" ? "🎁" : "✅"}</div>
-      <div class="grow"><b>${esc(e.title)}</b><div class="small muted">${e.type === "reward" ? "Pedido de prémio" : "Tarefa"} · ${fmtDate(e.date)}</div></div>
+      <div class="grow"><b>${esc(e.title)}</b><div class="small muted">${e.type === "reward" ? "Pedido de prémio" : "Tarefa"} · ${dayLabel(e.date)}</div></div>
       ${ptsHtml(e.points)}
       <button class="good" data-approve="${e.id}" aria-label="Aprovar">✓</button>
       <button class="bad" data-reject="${e.id}" aria-label="Rejeitar">✕</button></div>`).join("");
@@ -696,14 +722,24 @@ function openSettings() {
   const form = openForm("Definições", `
     <label>Mudar PIN do pai/mãe</label>
     <input name="pin" type="password" inputmode="numeric" maxlength="6" placeholder="Novo PIN (deixa vazio para manter)" autocomplete="off">
+    <label>Os filhos podem marcar tarefas até quantos dias para trás?</label>
+    <input name="backDays" type="number" inputmode="numeric" min="0" max="${MAX_BACK_DAYS}" required value="${backDays()}">
+    <p class="small muted">0 = só o próprio dia. Máximo ${MAX_BACK_DAYS}.</p>
     <p class="small muted">Conta: ${esc(S.user.email)}</p>
     <button type="button" class="bad" id="logoutAll" style="margin-top:8px">Sair da conta neste aparelho</button>`,
   async (fd) => {
     const pin = fd.get("pin");
-    if (!pin) return;
-    if (!validPin(pin)) throw new Error("O PIN tem de ter 4 a 6 dígitos.");
-    await updateDoc(famDoc(), { parentPinHash: await hashPin(pin) });
-    toast("PIN alterado.");
+    const back = Number(fd.get("backDays"));
+    if (!Number.isInteger(back) || back < 0 || back > MAX_BACK_DAYS) throw new Error(`Escolhe um número de dias entre 0 e ${MAX_BACK_DAYS}.`);
+    const changes = {};
+    if (pin) {
+      if (!validPin(pin)) throw new Error("O PIN tem de ter 4 a 6 dígitos.");
+      changes.parentPinHash = await hashPin(pin);
+    }
+    if (back !== backDays()) changes.maxBackDays = back;
+    if (!Object.keys(changes).length) return;
+    await updateDoc(famDoc(), changes);
+    toast("Definições guardadas.");
   });
   form.querySelector("#logoutAll").onclick = () => { closeModal(); signOut(auth); };
 }

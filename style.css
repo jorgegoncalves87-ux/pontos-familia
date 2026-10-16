@@ -165,3 +165,10 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-weight:
 }
 .empty { text-align: center; color: var(--muted); padding: 24px 8px; }
 .err { color: var(--bad); font-size: .9rem; min-height: 1.2em; margin-top: 6px; }
+
+.days { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 8px; scrollbar-width: none; }
+.days::-webkit-scrollbar { display: none; }
+.day { flex: none; border-radius: 999px; padding: 7px 14px; font-weight: 600; }
+.day.active { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
+.day .dot { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--warn-bg); color: var(--warn); font-size: .72rem; text-align: center; }
+.day.active .dot { background: var(--primary-text); color: var(--primary); }
