@@ -83,6 +83,8 @@ const kidById = (id) => S.kids.find((k) => k.id === id);
 const kidName = (id) => { const k = kidById(id); return k ? `${k.emoji} ${k.name}` : "?"; };
 const PHOTO_RE = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/;
 /** Foto do filho (se houver) ou o emoji. */
+/** Foto do perfil Pai/Mãe (se houver) ou o cadeado. */
+const parentAvatar = (cls = "") => avatar({ photo: S.fam?.parentPhoto, emoji: "🔐" }, cls);
 const avatar = (k, cls = "") => (k.photo && PHOTO_RE.test(k.photo)
   ? `<img class="avatar ${cls}" src="${k.photo}" alt="">`
   : `<span class="avatar-emoji ${cls}">${esc(k.emoji)}</span>`);
@@ -368,7 +370,7 @@ function renderProfiles() {
   app.innerHTML = `<div class="header"><h1>Quem és tu?</h1><button class="link" id="logout">${isDevice() ? "Desligar" : "Sair"}</button></div>
     <div class="profiles">
       ${S.kids.map((k) => `<button class="profile" data-kid="${k.id}"><span class="emoji">${avatar(k, "lg")}</span>${esc(k.name)}</button>`).join("")}
-      <button class="profile" data-parent><span class="emoji">🔐</span>Pai / Mãe</button>
+      <button class="profile" data-parent><span class="emoji">${parentAvatar("lg")}</span>Pai / Mãe</button>
     </div>
     ${S.kids.length ? "" : `<p class="muted" style="margin-top:16px">Ainda não há filhos. Entra como pai/mãe para os adicionar.</p>`}`;
   document.getElementById("logout").onclick = () => leaveDevice();
@@ -700,7 +702,7 @@ function renderParent() {
   ];
   const nav = renderTabs(tabs);
   const views = { validate: parentValidate, kids: parentKids, tasks: parentTasks, rewards: parentRewards, history: parentHistory };
-  app.innerHTML = `<div class="header"><h1>🔐 Pai / Mãe</h1>
+  app.innerHTML = `<div class="header"><h1 class="row">${parentAvatar("md")} Pai / Mãe</h1>
     <div><button class="link" id="settings">⚙️</button><button class="link" id="switch">Trocar</button></div></div>
     ${views[S.tab]()}${nav}`;
   document.getElementById("switch").onclick = () => setRole(null);
@@ -827,6 +829,18 @@ function pointsForm(kidId, sign) {
 
 const PHOTO_SIZE = 192;
 
+/** Campos do recorte de foto (usados por photoEditor). */
+const photoFieldHtml = () => `
+    <div class="row wrap">
+      <canvas id="photoCanvas" width="${PHOTO_SIZE}" height="${PHOTO_SIZE}" class="photo-edit hidden"></canvas>
+      <div class="grow">
+        <label class="btn" style="display:inline-block;margin:0;font-weight:400">📷 Escolher foto<input type="file" accept="image/*" id="photoFile" hidden></label>
+        <button type="button" class="link hidden" id="photoRemove">Remover foto</button>
+        <div id="photoZoomBox" class="hidden"><p class="small muted" style="margin:8px 0 2px">Arrasta para centrar a cara; usa a barra para aproximar.</p>
+          <input type="range" id="photoZoom" min="1" max="4" step="0.01" value="1"></div>
+      </div>
+    </div>`;
+
 /**
  * Recorte quadrado da foto: arrastar para mover, barra para aproximar.
  * Fica guardada como JPEG pequeno (~15 KB) nos dados da família — nunca no repositório público.
@@ -909,16 +923,7 @@ function kidForm(kid) {
   const emoji = kid?.emoji || EMOJIS[S.kids.length % EMOJIS.length];
   const form = openForm(kid ? `Editar ${kid.name}` : "Novo filho", `
     <label>Nome</label><input name="name" required maxlength="30" value="${esc(kid?.name || "")}">
-    <label>Foto</label>
-    <div class="row wrap">
-      <canvas id="photoCanvas" width="${PHOTO_SIZE}" height="${PHOTO_SIZE}" class="photo-edit hidden"></canvas>
-      <div class="grow">
-        <label class="btn" style="display:inline-block;margin:0;font-weight:400">📷 Escolher foto<input type="file" accept="image/*" id="photoFile" hidden></label>
-        <button type="button" class="link hidden" id="photoRemove">Remover foto</button>
-        <div id="photoZoomBox" class="hidden"><p class="small muted" style="margin:8px 0 2px">Arrasta para centrar a cara; usa a barra para aproximar.</p>
-          <input type="range" id="photoZoom" min="1" max="4" step="0.01" value="1"></div>
-      </div>
-    </div>
+    <label>Foto</label>${photoFieldHtml()}
     <label>Emoji (quando não há foto)</label><select name="emoji">${EMOJIS.map((e) => `<option ${e === emoji ? "selected" : ""}>${e}</option>`).join("")}</select>
     <label>${kid ? "Novo PIN (deixa vazio para manter)" : "PIN (4 a 6 dígitos)"}</label>
     <input name="pin" type="password" inputmode="numeric" maxlength="6" ${kid ? "" : "required"} autocomplete="off">
@@ -1036,6 +1041,7 @@ function rewardForm(reward) {
 
 function openSettings() {
   const form = openForm("Definições", `
+    <label>Foto do perfil Pai / Mãe</label>${photoFieldHtml()}
     <label>Mudar PIN do pai/mãe</label>
     <input name="pin" type="password" inputmode="numeric" maxlength="6" placeholder="Novo PIN (deixa vazio para manter)" autocomplete="off">
     <label>Os filhos podem marcar tarefas até quantos dias para trás?</label>
@@ -1059,10 +1065,12 @@ function openSettings() {
       changes.parentPinHash = await hashPin(pin);
     }
     if (back !== backDays()) changes.maxBackDays = back;
+    if (photo.changed) changes.parentPhoto = photo.dataUrl();
     if (!Object.keys(changes).length) return;
     await updateDoc(famDoc(), changes);
     toast("Definições guardadas.");
   });
+  const photo = photoEditor(form, S.fam.parentPhoto && PHOTO_RE.test(S.fam.parentPhoto) ? S.fam.parentPhoto : null);
   form.querySelector("#logoutAll").onclick = () => { closeModal(); leaveDevice(); };
   form.querySelector("#linkDevice").onclick = () => guard(openLinkDevice);
   form.querySelector("#unlinkAll").onclick = () => guard(async () => {
