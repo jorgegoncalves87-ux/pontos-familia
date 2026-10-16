@@ -10,4 +10,4 @@ export const firebaseConfig = {
 };
 
 // Chave pública para notificações (Configurações do projeto → Cloud Messaging → Certificados push da Web).
-export const vapidKey = "";
+export const vapidKey = "BCVFMDLn_fk1oPRKMd6JylLjGtQALNUDRh6G0kRsqPQYHH4tvfGpsVpKC0R7MTCTuX_m1HKXjhydAs9x55ULMuE";
