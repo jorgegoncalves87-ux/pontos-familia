@@ -1,11 +1,13 @@
 :root {
-  --bg: #f6f4ff;
+  /* Turquesa do ícone (escurecido para o texto branco se ler bem). */
+  --bg: #f2f9f9;
   --card: #ffffff;
-  --text: #1d1b2c;
-  --muted: #6b6880;
-  --border: #e4e0f5;
-  --primary: #6c4ef5;
+  --text: #14292a;
+  --muted: #5f7071;
+  --border: #d6e9e9;
+  --primary: #0d7c80;
   --primary-text: #ffffff;
+  --brand-gradient: linear-gradient(135deg, #128f93, #0a6d72);
   --good: #1f9d55;
   --good-bg: #e3f7ec;
   --bad: #d64545;
@@ -16,12 +18,13 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #14121f;
-    --card: #1f1c2e;
-    --text: #eeeaff;
-    --muted: #a19cba;
-    --border: #322d48;
-    --primary: #8b74ff;
+    --bg: #0e1a1b;
+    --card: #162526;
+    --text: #e6f4f4;
+    --muted: #9db3b4;
+    --border: #24393a;
+    --primary: #3cc4c8;
+    --primary-text: #04292b;
     --good: #4ade80;
     --good-bg: #163323;
     --bad: #f87171;
@@ -92,7 +95,7 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-weight:
 
 .header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
 .balance {
-  background: var(--primary); color: var(--primary-text);
+  background: var(--brand-gradient); color: #fff;
   border-radius: var(--radius); padding: 18px; text-align: center; margin-bottom: 14px;
 }
 .balance .big { font-size: 2.6rem; font-weight: 800; line-height: 1.1; }
@@ -174,8 +177,8 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-weight:
 .day.active .dot { background: var(--primary-text); color: var(--primary); }
 
 /* Gráfico semanal */
-:root { --gain: #2b7fd6; --loss: #e8590c; --grid: #e6e3ef; }
-@media (prefers-color-scheme: dark) { :root { --gain: #4a86e0; --loss: #e0703a; --grid: #322d48; } }
+:root { --gain: #2b7fd6; --loss: #e8590c; --grid: #e2efef; }
+@media (prefers-color-scheme: dark) { :root { --gain: #4a86e0; --loss: #e0703a; --grid: #24393a; } }
 .chart { margin-top: 12px; }
 .chart svg { width: 100%; height: auto; display: block; margin-top: 8px; overflow: visible; }
 .chart .bar-gain { fill: var(--gain); }
@@ -227,7 +230,7 @@ h1.row, h2.row { gap: 10px; }
 /* Missões (tarefas com prazo) — no turquesa do ícone da app */
 .special {
   border-radius: var(--radius); padding: 16px; margin-bottom: 12px; color: #fff;
-  background: linear-gradient(135deg, #128f93, #0a6d72);
+  background: var(--brand-gradient);
   box-shadow: 0 6px 18px rgba(11, 127, 132, .25);
 }
 .special.over { background: linear-gradient(135deg, #6b7280, #4b5563); box-shadow: none; }
