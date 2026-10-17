@@ -668,7 +668,7 @@ function historyItem(e, showKid, editable = false) {
   // Um extra à espera ainda não tem pontos: mostra os que o filho pediu.
   const pts = e.type === "extra" && e.status === "pending"
     ? `<span class="pts">${e.suggested ? `pede ${e.suggested}` : "?"}</span>` : ptsHtml(e.points);
-  const canFix = editable && e.status === "approved" && CORRECTABLE.includes(e.type);
+  const canFix = editable && ["approved", "rejected"].includes(e.status) && CORRECTABLE.includes(e.type);
   return `<div class="card row">
     <div style="font-size:1.4rem">${icon}</div>
     <div class="grow"><div><b>${esc(e.title)}</b></div>
@@ -678,32 +678,41 @@ function historyItem(e, showKid, editable = false) {
 }
 
 /**
- * Corrige os pontos de um registo já aprovado e acerta o saldo pela diferença
- * (o saldo continua a não descer abaixo de 0). O filho é avisado da correção.
+ * Corrige os pontos de um registo aprovado ou rejeitado e acerta o saldo pela diferença
+ * (o saldo continua a não descer abaixo de 0). Com pontos > 0 fica aprovado; com 0 fica
+ * rejeitado. O filho é avisado da correção.
  */
 async function correctEntry(entryId, newPoints) {
   await runTransaction(db, async (tx) => {
     const eRef = doc(col("log"), entryId);
     const e = await tx.get(eRef);
-    if (!e.exists() || e.data().status !== "approved") throw new Error("Este registo já não pode ser corrigido.");
+    if (!e.exists() || !["approved", "rejected"].includes(e.data().status)) throw new Error("Este registo já não pode ser corrigido.");
     const entry = e.data();
     const kRef = doc(col("kids"), entry.kidId);
     const k = await tx.get(kRef);
     if (!k.exists()) throw new Error("Este filho já não existe.");
     const cur = k.data().points || 0;
-    const base = cur - (entry.applied ?? entry.points);
+    // Um registo rejeitado não mexeu no saldo.
+    const base = entry.status === "approved" ? cur - (entry.applied ?? entry.points) : cur;
     const next = Math.max(0, base + newPoints);
     tx.update(kRef, { points: next });
-    tx.update(eRef, { points: newPoints, applied: next - base, corrected: true, decidedAt: serverTimestamp(), notifiedKid: false });
+    tx.update(eRef, {
+      status: newPoints === 0 ? "rejected" : "approved", points: newPoints, applied: next - base,
+      corrected: true, decidedAt: serverTimestamp(), notifiedKid: false,
+    });
   });
 }
 
 function fixForm(e) {
   const isPenalty = e.type === "penalty";
-  openForm(`Corrigir "${e.title}"`, `<p class="small muted">${esc(kidName(e.kidId))} · ${fmtDate(e.date)} · agora: ${e.points} pontos.
-      O saldo é acertado pela diferença.</p>
+  const rejected = e.status === "rejected";
+  // Para um rejeitado, sugere os pontos da tarefa (ou os pedidos, num extra).
+  const task = S.tasks.find((t) => t.id === e.taskId);
+  const value = rejected ? (e.type === "extra" ? e.suggested ?? "" : task?.points ?? Math.abs(e.points)) : Math.abs(e.points);
+  openForm(`Corrigir "${e.title}"`, `<p class="small muted">${esc(kidName(e.kidId))} · ${fmtDate(e.date)} · ${rejected ? "estava rejeitado" : `agora: ${e.points} pontos`}.
+      O saldo é acertado pela diferença. Com 0 fica rejeitado.</p>
     <label>${isPenalty ? "Pontos a retirar" : "Pontos certos"}</label>
-    <input name="points" type="number" inputmode="numeric" min="0" required value="${Math.abs(e.points)}">`,
+    <input name="points" type="number" inputmode="numeric" min="0" required value="${value}">`,
   async (fd) => {
     const n = readPoints(fd.get("points"), { allowZero: true });
     await correctEntry(e.id, isPenalty ? -n : n);
@@ -1027,7 +1036,7 @@ function pointsForm(kidId, sign) {
 // ---------- Atualizações ----------
 // Os telemóveis guardam a app em cache; ao abrir (e ao voltar à app) comparamos com version.json
 // e, se houver versão nova, recarregamos os ficheiros. Atualiza APP_VERSION e version.json juntos.
-const APP_VERSION = "2026-10-17.1";
+const APP_VERSION = "2026-10-17.2";
 async function checkForUpdate() {
   try {
     if (!modal.classList.contains("hidden")) return; // não interromper quem está a escrever
