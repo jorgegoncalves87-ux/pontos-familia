@@ -785,12 +785,13 @@ function renderKid(kid) {
   }
   const pending = S.log.filter((e) => e.kidId === kid.id && e.type === "task" && e.status === "pending")
     .reduce((s, e) => s + e.points, 0);
-  renderShell(`<div class="header"><h1 class="row">${avatar(kid, "md")} ${esc(kid.name)}</h1><div>${bellButton(kid.id)}<button class="link" id="switch">Trocar</button></div></div>
+  renderShell(`<div class="header"><h1 class="row"><button class="avatar-btn" id="myPhoto" aria-label="Mudar a minha foto">${avatar(kid, "md")}<span class="cam">📷</span></button> ${esc(kid.name)}</h1><div>${bellButton(kid.id)}<button class="link" id="switch">Trocar</button></div></div>
     <div class="balance"><div class="big">⭐ ${kid.points || 0}</div><div>pontos${pending ? ` · +${pending} por validar` : ""}</div></div>
     ${body}`, nav);
   document.getElementById("switch").onclick = () => setRole(null);
   bindTabs();
   document.getElementById("bell").onclick = () => guard(() => togglePush(kid.id));
+  document.getElementById("myPhoto").onclick = () => photoForm(`A foto de ${kid.name}`, kid.photo, (photo) => updateDoc(doc(col("kids"), kid.id), { photo }));
   bindKidActions(kid);
   bindCharts();
 }
@@ -979,13 +980,14 @@ function renderParent() {
   ];
   const nav = renderTabs(tabs);
   const views = { validate: parentValidate, kids: parentKids, tasks: parentTasks, rewards: parentRewards, history: parentHistory };
-  renderShell(`<div class="header"><h1 class="row">${parentAvatar("md")} Pai / Mãe</h1>
+  renderShell(`<div class="header"><h1 class="row"><button class="avatar-btn" id="myPhoto" aria-label="Mudar a foto do pai/mãe">${parentAvatar("md")}<span class="cam">📷</span></button> Pai / Mãe</h1>
     <div>${bellButton("parent")}<button class="link" id="settings">⚙️</button><button class="link" id="switch">Trocar</button></div></div>
     ${views[S.tab]()}`, nav);
   document.getElementById("switch").onclick = () => setRole(null);
   document.getElementById("settings").onclick = openSettings;
   bindTabs();
   document.getElementById("bell").onclick = () => guard(() => togglePush("parent"));
+  document.getElementById("myPhoto").onclick = () => photoForm("Foto do pai/mãe", S.fam.parentPhoto, (photo) => updateDoc(famDoc(), { parentPhoto: photo }));
   bindParentActions();
   bindCharts();
 }
@@ -1038,7 +1040,7 @@ function parentValidate() {
 function parentKids() {
   return (S.kids.length > 1 ? `<h2 style="margin-top:0">Comparação</h2>${siblingsSummary()}` : "")
     + (S.kids.length ? S.kids.map((k) => `<div class="card">
-      <div class="row">${avatar(k, "md")}
+      <div class="row"><button class="avatar-btn" data-kid-photo="${k.id}" aria-label="Mudar a foto de ${esc(k.name)}">${avatar(k, "md")}<span class="cam">📷</span></button>
         <div class="grow"><h3>${esc(k.name)}</h3><div class="muted small">${pendingRewardCost(k.id) ? `${pendingRewardCost(k.id)} pts em pedidos de prémio` : ""}</div></div>
         <div class="pts" style="font-size:1.4rem">⭐ ${k.points || 0}</div></div>
       ${weekChart(k)}
@@ -1108,6 +1110,7 @@ function bindParentActions() {
   on("[data-penalty]", (b) => pointsForm(b.dataset.penalty, -1));
   on("[data-bonus]", (b) => pointsForm(b.dataset.bonus, 1));
   on("[data-edit-kid]", (b) => kidForm(kidById(b.dataset.editKid)));
+  on("[data-kid-photo]", (b) => { const k = kidById(b.dataset.kidPhoto); photoForm(`A foto de ${k.name}`, k.photo, (photo) => updateDoc(doc(col("kids"), k.id), { photo })); });
   on("[data-edit-task]", (b) => taskForm(S.tasks.find((t) => t.id === b.dataset.editTask)));
   on("[data-edit-reward]", (b) => rewardForm(S.rewards.find((r) => r.id === b.dataset.editReward)));
   on("#addKid", () => kidForm(null));
@@ -1153,7 +1156,7 @@ function pointsForm(kidId, sign) {
 // ---------- Atualizações ----------
 // Os telemóveis guardam a app em cache; ao abrir (e ao voltar à app) comparamos com version.json
 // e, se houver versão nova, recarregamos os ficheiros. Atualiza APP_VERSION e version.json juntos.
-const APP_VERSION = "2026-10-17.5";
+const APP_VERSION = "2026-10-17.6";
 async function checkForUpdate() {
   try {
     if (!modal.classList.contains("hidden")) return; // não interromper quem está a escrever
@@ -1261,6 +1264,19 @@ function photoEditor(form, initial) {
     get changed() { return st.changed; },
     dataUrl: () => (st.removed || !st.img ? null : canvas.toDataURL("image/jpeg", 0.82)),
   };
+}
+
+/** Janela só para mudar uma foto (abre ao tocar na foto). */
+function photoForm(title, current, save) {
+  const form = openForm(title, `${photoFieldHtml()}<p class="small muted" style="margin-top:10px">Toca em "Escolher foto" para tirar uma foto ou escolher da galeria.</p>`,
+    async () => {
+      if (!photo.changed) return;
+      await save(photo.dataUrl());
+      toast("Foto atualizada! 📸");
+    });
+  const photo = photoEditor(form, current && PHOTO_RE.test(current) ? current : null);
+  // Abre logo a escolha da foto (no iPhone pode ser preciso tocar no botão).
+  setTimeout(() => form.querySelector("#photoFile")?.click(), 50);
 }
 
 function kidForm(kid) {

@@ -243,3 +243,10 @@ h1.row, h2.row { gap: 10px; }
 .special button.link { color: #fff; }
 .special .pill.pending { background: rgba(255,255,255,.9); }
 .special-row { border-left: 4px solid #14b3b8; }
+
+/* Tocar na foto para a mudar */
+.avatar-btn { position: relative; border: none; background: none; padding: 0; border-radius: 50%; line-height: 0; cursor: pointer; flex: none; }
+.avatar-btn .cam {
+  position: absolute; right: -4px; bottom: -4px; font-size: .7rem; line-height: 1;
+  background: var(--card); border: 1px solid var(--border); border-radius: 50%; padding: 3px;
+}
