@@ -1,7 +1,7 @@
 // Notificador da app Pontos da Família. Corre a cada ~10 minutos no GitHub Actions
 // (.github/workflows/notify.yml) e envia notificações push pelo Firebase Cloud Messaging:
 //  - pai/mãe: tarefas marcadas, prémios pedidos e prémios sugeridos à espera de validação;
-//  - filhos: pontos validados/rejeitados, bónus e penalizações;
+//  - filhos: pontos validados/rejeitados, bónus, penalizações e missões;
 //  - filhos, por volta das 19:45 (Lisboa): lembrete se ainda há tarefas do dia por marcar.
 // Uso: FIREBASE_SERVICE_ACCOUNT='<json>' node notify.mjs [--log-only]
 //   --log-only: escreve as mensagens no ecrã em vez de as enviar (para testes).
@@ -105,7 +105,7 @@ async function processFamily(fam) {
       const parts = [];
       if (k.tasks) parts.push(`marcou ${plural(k.tasks, "tarefa", "tarefas")}`);
       if (k.rewards.length) parts.push(`pediu ${k.rewards.length === 1 ? `o prémio "${k.rewards[0]}"` : `${k.rewards.length} prémios`}`);
-      if (k.specials.length) parts.push(`diz que já fez a tarefa especial ${k.specials.map((t) => `"${t}"`).join(", ")}`);
+      if (k.specials.length) parts.push(`diz que já cumpriu a missão ${k.specials.map((t) => `"${t}"`).join(", ")}`);
       if (k.extras.length) parts.push(`pede pontos por ${k.extras.length === 1 ? `"${k.extras[0]}"` : `${k.extras.length} coisas fora da lista`}`);
       lines.push(`${kidName(kidId)} ${parts.join(" e ")}`);
     }
@@ -122,7 +122,7 @@ async function processFamily(fam) {
     ...newSugg.map((d) => (b) => b.update(d.ref, { notifiedParent: true })),
   ]);
 
-  // 1b) Pai/mãe: tarefas especiais cujo prazo acabou e ainda não foram decididas.
+  // 1b) Pai/mãe: missões cujo prazo acabou e ainda não foram decididas.
   const { date: todayLis } = lisbonNow();
   const specials = tasksSnap.docs.map((d) => ({ ref: d.ref, id: d.id, ...d.data() })).filter((t) => t.active !== false && t.special && t.deadline);
   const ended = specials.filter((t) => t.deadline < todayLis && !t.notifiedEnded);
@@ -135,7 +135,7 @@ async function processFamily(fam) {
       if (who.length) lines.push(`"${t.title}" (${who.map(kidName).join(", ")})`);
     }
     if (!firstRun && lines.length) {
-      await send(fam, parentTokens, { title: "⭐ Tarefa especial terminou", body: `Decide se ganharam os pontos:\n${lines.join("\n")}`, tag: "especial" });
+      await send(fam, parentTokens, { title: "🚀 Missão terminou", body: `Decide se ganharam os pontos:\n${lines.join("\n")}`, tag: "especial" });
     }
     await commitInChunks(ended.map((t) => (b) => b.update(t.ref, { notifiedEnded: true })));
   }
@@ -160,7 +160,7 @@ async function processFamily(fam) {
       if (okTasks.length) lines.push(`✅ ${plural(okTasks.length, "tarefa validada", "tarefas validadas")}: ${signed(okTasks.reduce((s, e) => s + (e.applied ?? e.points), 0))} pontos`);
       const noTasks = entries.filter((e) => e.type === "task" && e.status === "rejected");
       if (noTasks.length) lines.push(`✕ ${plural(noTasks.length, "tarefa não foi aceite", "tarefas não foram aceites")}`);
-      for (const e of entries.filter((e) => e.type === "special")) lines.push(e.status === "approved" ? `⭐ Ganhaste a tarefa especial "${e.title}": ${signed(e.applied ?? e.points)} pontos!` : `⭐ Tarefa especial "${e.title}": desta vez não.`);
+      for (const e of entries.filter((e) => e.type === "special")) lines.push(e.status === "approved" ? `🚀 Missão cumprida "${e.title}": ${signed(e.applied ?? e.points)} pontos!` : `🚀 Missão "${e.title}": desta vez não.`);
       for (const e of entries.filter((e) => e.type === "extra")) lines.push(e.status === "approved" ? `💡 ${e.title}: ${signed(e.applied ?? e.points)} pontos` : `💡 Sem pontos para: ${e.title}`);
       for (const e of entries.filter((e) => e.type === "bonus")) lines.push(`🌟 Bónus ${signed(e.applied ?? e.points)}: ${e.title}`);
       for (const e of entries.filter((e) => e.type === "penalty")) lines.push(`⚠️ ${signed(e.applied ?? e.points)}: ${e.title}`);
@@ -190,7 +190,7 @@ async function processFamily(fam) {
       if (left) lines.push(left === 1
         ? "Falta 1 tarefa de hoje. Já a fizeste? Marca-a na app antes de dormir."
         : `Faltam ${left} tarefas de hoje. Já as fizeste? Marca-as na app antes de dormir.`);
-      for (const t of soon) lines.push(`⭐ "${t.title}" acaba ${t.deadline === date ? "hoje" : "amanhã"}!`);
+      for (const t of soon) lines.push(`🚀 A missão "${t.title}" acaba ${t.deadline === date ? "hoje" : "amanhã"}!`);
       await send(fam, kidTokens(kidId), { title: `⏰ ${kid.name}, ainda tens tarefas!`, body: lines.join("\n"), tag: `lembrete-${kidId}` });
     }
     await famRef.update({ "notify.lastReminderDate": date });

@@ -480,7 +480,7 @@ function tasksFor(kidId) {
 }
 const isRecurring = (t) => !!t.recurring;
 
-// ---------- Tarefas especiais (com prazo) ----------
+// ---------- Missões (tarefas com prazo) ----------
 // O pai/mãe define "até dia X". O filho pode dizer que já fez; no fim do prazo o pai/mãe decide
 // se ganhou os pontos. Os registos têm type "special" e taskId.
 const isSpecial = (t) => !!t.special && !!t.deadline;
@@ -488,10 +488,10 @@ const isSpecial = (t) => !!t.special && !!t.deadline;
 const deadlineMs = (t) => { const [y, m, d] = t.deadline.split("-").map(Number); return new Date(y, m - 1, d, 23, 59, 59).getTime(); };
 const isOver = (t) => Date.now() > deadlineMs(t);
 const kidsOf = (t) => (t.kidIds?.length ? S.kids.filter((k) => t.kidIds.includes(k.id)) : S.kids);
-/** Registo mais recente de um filho numa tarefa especial (S.log vem do mais recente para o mais antigo). */
+/** Registo mais recente de um filho numa missão (S.log vem do mais recente para o mais antigo). */
 const specialEntry = (kidId, taskId) => S.log.find((e) => e.type === "special" && e.kidId === kidId && e.taskId === taskId);
 const specialsFor = (kidId) => S.tasks.filter((t) => t.active !== false && isSpecial(t) && (!t.kidIds?.length || t.kidIds.includes(kidId)));
-/** Especiais já terminadas em que este filho ainda não tem decisão. */
+/** Missões já terminadas em que este filho ainda não tem decisão. */
 const undecidedSpecials = () => S.tasks.filter((t) => t.active !== false && isSpecial(t) && isOver(t))
   .flatMap((t) => kidsOf(t).filter((k) => !specialEntry(k.id, t.id)).map((k) => ({ t, k })));
 
@@ -511,7 +511,7 @@ setInterval(() => {
   if (ended) render();
 }, 1000);
 
-/** O pai/mãe decide uma especial terminada em que o filho não chegou a dizer que fez. */
+/** O pai/mãe decide uma missão terminada em que o filho não chegou a dizer que fez. */
 async function decideSpecial(task, kidId, won) {
   await runTransaction(db, async (tx) => {
     const kRef = doc(col("kids"), kidId);
@@ -709,7 +709,7 @@ function bindCharts() {
 const CORRECTABLE = ["task", "extra", "bonus", "penalty", "special"];
 
 function historyItem(e, showKid, editable = false) {
-  const icon = { task: "✅", reward: "🎁", penalty: "⚠️", bonus: "🌟", extra: "💡", special: "⭐" }[e.type] || "•";
+  const icon = { task: "✅", reward: "🎁", penalty: "⚠️", bonus: "🌟", extra: "💡", special: "🚀" }[e.type] || "•";
   const floorNote = e.status === "approved" && e.applied !== undefined && e.applied !== e.points
     ? `<div class="small muted">Aplicado: ${e.applied} (o saldo não desce abaixo de 0)</div>` : "";
   // Um extra à espera ainda não tem pontos: mostra os que o filho pediu.
@@ -810,7 +810,7 @@ function specialsBox(kid) {
     return !isOver(t) || !e || e.status === "pending" || now < deadlineMs(t) + 3 * 86400000;
   }).sort((a, b) => deadlineMs(a) - deadlineMs(b));
   if (!list.length) return "";
-  return `<h2>⭐ Tarefas especiais</h2>` + list.map((t) => {
+  return `<h2>🚀 Missões</h2>` + list.map((t) => {
     const e = specialEntry(kid.id, t.id), over = isOver(t);
     let status;
     if (e?.status === "approved") status = `<div class="sp-result win">🎉 Ganhaste ${ptsHtml(e.applied ?? e.points)} pontos!</div>`;
@@ -820,7 +820,7 @@ function specialsBox(kid) {
     else status = `<button class="primary block" data-special-done="${t.id}">✋ Já fiz!</button>`;
     return `<div class="special ${over ? "over" : ""}">
       <div class="row spread"><b class="sp-title">${esc(t.title)}</b><span class="sp-pts">+${t.points}</span></div>
-      <div class="small">Até ${weekday(t.deadline)} ${fmtDate(t.deadline)}</div>
+      <div class="small" style="font-weight:600">Até ${weekday(t.deadline)} ${fmtDate(t.deadline)}</div>
       ${over || ["approved", "rejected"].includes(e?.status) ? "" : `<div class="sp-count" data-deadline="${deadlineMs(t)}">${countdownText(deadlineMs(t) - now)}</div>`}
       ${status}
     </div>`;
@@ -929,7 +929,7 @@ function bindKidActions(kid) {
   })));
   app.querySelectorAll("[data-special-done]").forEach((b) => (b.onclick = () => guard(async () => {
     const t = S.tasks.find((x) => x.id === b.dataset.specialDone);
-    if (!t || isOver(t)) throw new Error("O prazo desta tarefa já terminou.");
+    if (!t || isOver(t)) throw new Error("O prazo desta missão já terminou.");
     if (specialEntry(kid.id, t.id)) return;
     await addDoc(col("log"), {
       kidId: kid.id, type: "special", taskId: t.id, title: t.title, points: t.points,
@@ -997,7 +997,7 @@ function parentValidate() {
   if (!pending.length && !suggestions.length && !ended.length) return `<div class="empty">Nada por validar. ✨</div>`;
   let html = "";
   if (ended.length) {
-    html += `<h2>⭐ Tarefas especiais terminadas</h2><p class="small muted">O prazo acabou. Ganharam os pontos?</p>`
+    html += `<h2>🚀 Missões terminadas</h2><p class="small muted">O prazo acabou. Ganharam os pontos?</p>`
       + ended.map(({ t, k }) => `<div class="card row wrap">
         ${avatar(k, "sm")}
         <div class="grow"><b>${esc(t.title)}</b><div class="small muted">${esc(k.name)} · terminou ${fmtDate(t.deadline)}</div></div>
@@ -1011,8 +1011,8 @@ function parentValidate() {
     html += `<div class="row spread"><h2 class="row">${avatar(kid, "sm")} ${esc(kid.name)} <span class="muted small">· saldo ${kid.points || 0}</span></h2>
       ${taskCount > 1 ? `<button class="good" data-approve-all="${kid.id}">Aprovar tarefas (${taskCount})</button>` : ""}</div>`;
     html += items.map((e) => e.type === "special" ? `<div class="card row wrap special-row">
-      <div style="font-size:1.3rem">⭐</div>
-      <div class="grow"><b>${esc(e.title)}</b><div class="small muted">Tarefa especial · diz que já fez · ${dayLabel(e.date)}</div></div>
+      <div style="font-size:1.3rem">🚀</div>
+      <div class="grow"><b>${esc(e.title)}</b><div class="small muted">Missão · diz que já fez · ${dayLabel(e.date)}</div></div>
       ${ptsHtml(e.points)}
       <button class="good" data-approve="${e.id}" aria-label="Ganhou">✓</button>
       <button class="bad" data-reject="${e.id}" aria-label="Não ganhou">✕</button></div>` : e.type === "extra" ? `<div class="card row wrap">
@@ -1065,8 +1065,8 @@ function parentTasks() {
       ${ptsHtml(t.points)}<button data-edit-task="${t.id}">Editar</button></div>`;
   };
   return `<button class="block" id="taskIdeas" style="margin-bottom:4px">💡 Ideias de tarefas</button>
-    <div class="row spread"><h2>⭐ Especiais <span class="muted small">· com prazo</span></h2><button class="primary" data-add-task="special">+ Nova</button></div>
-    ${specials.length ? specials.map(spRow).join("") : `<div class="empty">Desafios com data limite, como "Ler um livro até sexta". No fim decides se ganharam.</div>`}
+    <div class="row spread"><h2>🚀 Missões <span class="muted small">· com prazo</span></h2><button class="primary" data-add-task="special">+ Nova</button></div>
+    ${specials.length ? specials.map(spRow).join("") : `<div class="empty">Missões com data limite, como "Ler um livro até sexta". No fim decides se ganharam.</div>`}
     <div class="row spread"><h2>📅 Recorrentes <span class="muted small">· todos os dias</span></h2><button class="primary" data-add-task="rec">+ Nova</button></div>
     ${rec.length ? rec.map(row).join("") : `<div class="empty">Tarefas para fazer sempre, como "Fazer a cama".</div>`}
     <div class="row spread"><h2>✨ Espontâneas <span class="muted small">· quando acontecem</span></h2><button class="primary" data-add-task="extra">+ Nova</button></div>
@@ -1153,7 +1153,7 @@ function pointsForm(kidId, sign) {
 // ---------- Atualizações ----------
 // Os telemóveis guardam a app em cache; ao abrir (e ao voltar à app) comparamos com version.json
 // e, se houver versão nova, recarregamos os ficheiros. Atualiza APP_VERSION e version.json juntos.
-const APP_VERSION = "2026-10-17.3";
+const APP_VERSION = "2026-10-17.4";
 async function checkForUpdate() {
   try {
     if (!modal.classList.contains("hidden")) return; // não interromper quem está a escrever
@@ -1302,7 +1302,7 @@ function taskForm(task, kindDefault = "rec") {
     <label>Tipo</label>
     <label class="inline"><input type="radio" name="kind" value="rec" ${kind === "rec" ? "checked" : ""}> 📅 Recorrente (todos os dias)</label>
     <label class="inline"><input type="radio" name="kind" value="extra" ${kind === "extra" ? "checked" : ""}> ✨ Espontânea (quando acontece)</label>
-    <label class="inline"><input type="radio" name="kind" value="special" ${kind === "special" ? "checked" : ""}> ⭐ Especial (com prazo)</label>
+    <label class="inline"><input type="radio" name="kind" value="special" ${kind === "special" ? "checked" : ""}> 🚀 Missão (com prazo)</label>
     <div id="deadlineBox"><label>Até que dia?</label><input name="deadline" type="date" min="${today()}" value="${task?.deadline || addDays(today(), 7)}">
       <p class="small muted">Os filhos veem um contador até ao fim desse dia. No fim, decides se ganharam os pontos.</p></div>
     <label>Para quem</label>

@@ -224,11 +224,11 @@ h1.row, h2.row { gap: 10px; }
 #app.shell > .scroll > .inner { max-width: 720px; margin: 0 auto; padding: 16px 16px 24px; }
 #app.shell > .tabs { position: static; flex: none; }
 
-/* Tarefas especiais */
+/* Missões (tarefas com prazo) — no turquesa do ícone da app */
 .special {
   border-radius: var(--radius); padding: 16px; margin-bottom: 12px; color: #fff;
-  background: linear-gradient(135deg, #7c3aed, #db2777);
-  box-shadow: 0 6px 18px rgba(124, 58, 237, .25);
+  background: linear-gradient(135deg, #128f93, #0a6d72);
+  box-shadow: 0 6px 18px rgba(11, 127, 132, .25);
 }
 .special.over { background: linear-gradient(135deg, #6b7280, #4b5563); box-shadow: none; }
 .special .sp-title { font-size: 1.15rem; }
@@ -236,7 +236,7 @@ h1.row, h2.row { gap: 10px; }
 .special .sp-count { font-size: 1.9rem; font-weight: 800; font-variant-numeric: tabular-nums; margin: 8px 0 10px; letter-spacing: .02em; }
 .special .sp-result { margin-top: 10px; font-weight: 700; }
 .special .sp-result .pts { color: #fff; }
-.special button.primary { background: #fff; color: #7c3aed; border-color: #fff; font-weight: 700; margin-top: 4px; }
+.special button.primary { background: #fff; color: #0a6d72; border-color: #fff; font-weight: 700; margin-top: 4px; }
 .special button.link { color: #fff; }
 .special .pill.pending { background: rgba(255,255,255,.9); }
-.special-row { border-left: 4px solid #db2777; }
+.special-row { border-left: 4px solid #14b3b8; }
