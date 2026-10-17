@@ -659,15 +659,56 @@ function bindCharts() {
   });
 }
 
-function historyItem(e, showKid) {
+const CORRECTABLE = ["task", "extra", "bonus", "penalty"];
+
+function historyItem(e, showKid, editable = false) {
   const icon = { task: "✅", reward: "🎁", penalty: "⚠️", bonus: "🌟", extra: "💡" }[e.type] || "•";
   const floorNote = e.status === "approved" && e.applied !== undefined && e.applied !== e.points
     ? `<div class="small muted">Aplicado: ${e.applied} (o saldo não desce abaixo de 0)</div>` : "";
+  // Um extra à espera ainda não tem pontos: mostra os que o filho pediu.
+  const pts = e.type === "extra" && e.status === "pending"
+    ? `<span class="pts">${e.suggested ? `pede ${e.suggested}` : "?"}</span>` : ptsHtml(e.points);
+  const canFix = editable && e.status === "approved" && CORRECTABLE.includes(e.type);
   return `<div class="card row">
     <div style="font-size:1.4rem">${icon}</div>
     <div class="grow"><div><b>${esc(e.title)}</b></div>
-      <div class="small muted">${fmtDate(e.date)}${showKid ? " · " + esc(kidName(e.kidId)) : ""}</div>${floorNote}</div>
-    <div style="text-align:right">${ptsHtml(e.points)}<div>${statusPill(e.status)}</div></div></div>`;
+      <div class="small muted">${fmtDate(e.date)}${showKid ? " · " + esc(kidName(e.kidId)) : ""}${e.corrected ? " · corrigido" : ""}</div>${floorNote}
+      ${canFix ? `<button class="link" style="padding:4px 0" data-fix="${e.id}">Corrigir pontos</button>` : ""}</div>
+    <div style="text-align:right">${pts}<div>${statusPill(e.status)}</div></div></div>`;
+}
+
+/**
+ * Corrige os pontos de um registo já aprovado e acerta o saldo pela diferença
+ * (o saldo continua a não descer abaixo de 0). O filho é avisado da correção.
+ */
+async function correctEntry(entryId, newPoints) {
+  await runTransaction(db, async (tx) => {
+    const eRef = doc(col("log"), entryId);
+    const e = await tx.get(eRef);
+    if (!e.exists() || e.data().status !== "approved") throw new Error("Este registo já não pode ser corrigido.");
+    const entry = e.data();
+    const kRef = doc(col("kids"), entry.kidId);
+    const k = await tx.get(kRef);
+    if (!k.exists()) throw new Error("Este filho já não existe.");
+    const cur = k.data().points || 0;
+    const base = cur - (entry.applied ?? entry.points);
+    const next = Math.max(0, base + newPoints);
+    tx.update(kRef, { points: next });
+    tx.update(eRef, { points: newPoints, applied: next - base, corrected: true, decidedAt: serverTimestamp(), notifiedKid: false });
+  });
+}
+
+function fixForm(e) {
+  const isPenalty = e.type === "penalty";
+  openForm(`Corrigir "${e.title}"`, `<p class="small muted">${esc(kidName(e.kidId))} · ${fmtDate(e.date)} · agora: ${e.points} pontos.
+      O saldo é acertado pela diferença.</p>
+    <label>${isPenalty ? "Pontos a retirar" : "Pontos certos"}</label>
+    <input name="points" type="number" inputmode="numeric" min="0" required value="${Math.abs(e.points)}">`,
+  async (fd) => {
+    const n = readPoints(fd.get("points"), { allowZero: true });
+    await correctEntry(e.id, isPenalty ? -n : n);
+    toast("Pontos corrigidos.");
+  }, "Corrigir");
 }
 
 // ---------- Vista do filho ----------
@@ -926,12 +967,13 @@ function parentRewards() {
 
 function parentHistory() {
   const items = S.log.filter((e) => e.status !== "pending");
-  return items.length ? items.slice(0, 200).map((e) => historyItem(e, true)).join("") : `<div class="empty">Ainda não há histórico.</div>`;
+  return items.length ? items.slice(0, 200).map((e) => historyItem(e, true, true)).join("") : `<div class="empty">Ainda não há histórico.</div>`;
 }
 
 function bindParentActions() {
   const on = (sel, fn) => app.querySelectorAll(sel).forEach((b) => (b.onclick = () => fn(b)));
   on("[data-approve]", (b) => guard(() => approveEntry(b.dataset.approve)));
+  on("[data-fix]", (b) => fixForm(S.log.find((x) => x.id === b.dataset.fix)));
   on("[data-give-extra]", (b) => {
     const e = S.log.find((x) => x.id === b.dataset.giveExtra);
     openForm(`Pontos para "${e.title}"`, `<p class="small muted">${esc(kidName(e.kidId))}${e.suggested ? ` pediu ${e.suggested} pontos` : " não sugeriu pontos"}.</p>
@@ -985,7 +1027,7 @@ function pointsForm(kidId, sign) {
 // ---------- Atualizações ----------
 // Os telemóveis guardam a app em cache; ao abrir (e ao voltar à app) comparamos com version.json
 // e, se houver versão nova, recarregamos os ficheiros. Atualiza APP_VERSION e version.json juntos.
-const APP_VERSION = "2026-10-16.2";
+const APP_VERSION = "2026-10-17.1";
 async function checkForUpdate() {
   try {
     if (!modal.classList.contains("hidden")) return; // não interromper quem está a escrever

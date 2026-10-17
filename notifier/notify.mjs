@@ -131,9 +131,11 @@ async function processFamily(fam) {
       if (!byKid.has(e.kidId)) byKid.set(e.kidId, []);
       byKid.get(e.kidId).push(e);
     }
-    for (const [kidId, entries] of byKid) {
+    for (let [kidId, entries] of byKid) {
       if (!kids.has(kidId)) continue;
       const lines = [];
+      for (const e of entries.filter((e) => e.corrected)) lines.push(`✏️ Corrigido: ${e.title} → ${signed(e.applied ?? e.points)} pontos`);
+      entries = entries.filter((e) => !e.corrected);
       const okTasks = entries.filter((e) => e.type === "task" && e.status === "approved");
       if (okTasks.length) lines.push(`✅ ${plural(okTasks.length, "tarefa validada", "tarefas validadas")}: ${signed(okTasks.reduce((s, e) => s + (e.applied ?? e.points), 0))} pontos`);
       const noTasks = entries.filter((e) => e.type === "task" && e.status === "rejected");
