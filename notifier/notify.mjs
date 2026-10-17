@@ -94,9 +94,10 @@ async function processFamily(fam) {
     const byKid = new Map();
     for (const d of newPending) {
       const e = d.data();
-      const k = byKid.get(e.kidId) || { tasks: 0, rewards: [], extras: [] };
+      const k = byKid.get(e.kidId) || { tasks: 0, rewards: [], extras: [], specials: [] };
       if (e.type === "reward") k.rewards.push(e.title);
       else if (e.type === "extra") k.extras.push(e.title);
+      else if (e.type === "special") k.specials.push(e.title);
       else k.tasks++;
       byKid.set(e.kidId, k);
     }
@@ -104,6 +105,7 @@ async function processFamily(fam) {
       const parts = [];
       if (k.tasks) parts.push(`marcou ${plural(k.tasks, "tarefa", "tarefas")}`);
       if (k.rewards.length) parts.push(`pediu ${k.rewards.length === 1 ? `o prémio "${k.rewards[0]}"` : `${k.rewards.length} prémios`}`);
+      if (k.specials.length) parts.push(`diz que já fez a tarefa especial ${k.specials.map((t) => `"${t}"`).join(", ")}`);
       if (k.extras.length) parts.push(`pede pontos por ${k.extras.length === 1 ? `"${k.extras[0]}"` : `${k.extras.length} coisas fora da lista`}`);
       lines.push(`${kidName(kidId)} ${parts.join(" e ")}`);
     }
@@ -119,6 +121,24 @@ async function processFamily(fam) {
     ...newPending.map((d) => (b) => b.update(d.ref, { notifiedParent: true })),
     ...newSugg.map((d) => (b) => b.update(d.ref, { notifiedParent: true })),
   ]);
+
+  // 1b) Pai/mãe: tarefas especiais cujo prazo acabou e ainda não foram decididas.
+  const { date: todayLis } = lisbonNow();
+  const specials = tasksSnap.docs.map((d) => ({ ref: d.ref, id: d.id, ...d.data() })).filter((t) => t.active !== false && t.special && t.deadline);
+  const ended = specials.filter((t) => t.deadline < todayLis && !t.notifiedEnded);
+  if (ended.length) {
+    const specialLog = await famRef.collection("log").where("type", "==", "special").get();
+    const decided = new Set(specialLog.docs.filter((d) => d.get("status") !== "pending").map((d) => `${d.get("kidId")}|${d.get("taskId")}`));
+    const lines = [];
+    for (const t of ended) {
+      const who = [...kids.keys()].filter((id) => (!t.kidIds?.length || t.kidIds.includes(id)) && !decided.has(`${id}|${t.id}`));
+      if (who.length) lines.push(`"${t.title}" (${who.map(kidName).join(", ")})`);
+    }
+    if (!firstRun && lines.length) {
+      await send(fam, parentTokens, { title: "⭐ Tarefa especial terminou", body: `Decide se ganharam os pontos:\n${lines.join("\n")}`, tag: "especial" });
+    }
+    await commitInChunks(ended.map((t) => (b) => b.update(t.ref, { notifiedEnded: true })));
+  }
 
   // 2) Filhos: pontos validados (ou rejeitados), bónus e penalizações dos últimos 3 dias.
   const since = Timestamp.fromMillis(NOW.getTime() - 3 * 24 * 3600 * 1000);
@@ -140,6 +160,7 @@ async function processFamily(fam) {
       if (okTasks.length) lines.push(`✅ ${plural(okTasks.length, "tarefa validada", "tarefas validadas")}: ${signed(okTasks.reduce((s, e) => s + (e.applied ?? e.points), 0))} pontos`);
       const noTasks = entries.filter((e) => e.type === "task" && e.status === "rejected");
       if (noTasks.length) lines.push(`✕ ${plural(noTasks.length, "tarefa não foi aceite", "tarefas não foram aceites")}`);
+      for (const e of entries.filter((e) => e.type === "special")) lines.push(e.status === "approved" ? `⭐ Ganhaste a tarefa especial "${e.title}": ${signed(e.applied ?? e.points)} pontos!` : `⭐ Tarefa especial "${e.title}": desta vez não.`);
       for (const e of entries.filter((e) => e.type === "extra")) lines.push(e.status === "approved" ? `💡 ${e.title}: ${signed(e.applied ?? e.points)} pontos` : `💡 Sem pontos para: ${e.title}`);
       for (const e of entries.filter((e) => e.type === "bonus")) lines.push(`🌟 Bónus ${signed(e.applied ?? e.points)}: ${e.title}`);
       for (const e of entries.filter((e) => e.type === "penalty")) lines.push(`⚠️ ${signed(e.applied ?? e.points)}: ${e.title}`);
@@ -156,18 +177,21 @@ async function processFamily(fam) {
   if (time >= REMINDER_START && time <= REMINDER_END && notify.lastReminderDate !== date) {
     const todaySnap = await famRef.collection("log").where("date", "==", date).get();
     const marked = new Set(todaySnap.docs.filter((d) => d.get("type") === "task").map((d) => `${d.get("kidId")}|${d.get("taskId")}`));
-    const tasks = tasksSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((t) => t.active !== false && t.recurring);
+    const tasks = tasksSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((t) => t.active !== false && t.recurring && !t.special);
+    const claimed = new Set((await famRef.collection("log").where("type", "==", "special").get()).docs.map((d) => `${d.get("kidId")}|${d.get("taskId")}`));
     for (const [kidId, kid] of kids) {
       const mine = tasks.filter((t) => !t.kidIds?.length || t.kidIds.includes(kidId));
       const left = mine.filter((t) => !marked.has(`${kidId}|${t.id}`)).length;
-      if (!left) continue;
-      await send(fam, kidTokens(kidId), {
-        title: `⏰ ${kid.name}, ainda tens tarefas!`,
-        body: left === 1
-          ? "Falta 1 tarefa de hoje. Já a fizeste? Marca-a na app antes de dormir."
-          : `Faltam ${left} tarefas de hoje. Já as fizeste? Marca-as na app antes de dormir.`,
-        tag: `lembrete-${kidId}`,
-      });
+      const tomorrow = new Date(`${date}T12:00:00Z`); tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+      const tom = tomorrow.toISOString().slice(0, 10);
+      const soon = specials.filter((t) => (t.deadline === date || t.deadline === tom) && (!t.kidIds?.length || t.kidIds.includes(kidId)) && !claimed.has(`${kidId}|${t.id}`));
+      if (!left && !soon.length) continue;
+      const lines = [];
+      if (left) lines.push(left === 1
+        ? "Falta 1 tarefa de hoje. Já a fizeste? Marca-a na app antes de dormir."
+        : `Faltam ${left} tarefas de hoje. Já as fizeste? Marca-as na app antes de dormir.`);
+      for (const t of soon) lines.push(`⭐ "${t.title}" acaba ${t.deadline === date ? "hoje" : "amanhã"}!`);
+      await send(fam, kidTokens(kidId), { title: `⏰ ${kid.name}, ainda tens tarefas!`, body: lines.join("\n"), tag: `lembrete-${kidId}` });
     }
     await famRef.update({ "notify.lastReminderDate": date });
   }
