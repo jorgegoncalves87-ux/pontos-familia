@@ -271,14 +271,16 @@ async function sha256hex(text) {
   return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function pushToken() {
+// O iPhone só mostra o pedido de autorização se for feito no próprio toque: qualquer espera antes
+// faz com que recuse em silêncio. Por isso o pedido é feito logo no toque do sino e passado para aqui.
+async function pushToken(permRequest) {
   if (!vapidKey) throw new Error("As notificações ainda não estão configuradas (falta a chave Web Push).");
   if (!(await messagingSupported().catch(() => false)) || !("serviceWorker" in navigator)) {
     throw new Error(isIOS() && !isStandalone()
       ? "No iPhone, primeiro adiciona a app ao ecrã principal (Partilhar → Adicionar ao ecrã principal) e abre-a a partir do ícone."
       : "Este navegador não suporta notificações.");
   }
-  const perm = await Notification.requestPermission();
+  const perm = await (permRequest ?? Notification.requestPermission());
   if (perm !== "granted") throw new Error("As notificações foram bloqueadas. Ativa-as nas definições do telemóvel para esta app.");
   const reg = await navigator.serviceWorker.register("./sw.js");
   const token = await getToken(getMessaging(fbApp), { vapidKey, serviceWorkerRegistration: reg });
@@ -294,7 +296,10 @@ async function togglePush(who) {
     try { localStorage.removeItem(pushKey(who)); } catch {}
     toast("Notificações desligadas neste aparelho.");
   } else {
-    const token = await pushToken();
+    // Nada de "await" antes disto (ver pushToken).
+    const permRequest = typeof Notification !== "undefined" && Notification.permission === "default" && !(isIOS() && !isStandalone())
+      ? Notification.requestPermission() : null;
+    const token = await pushToken(permRequest);
     const id = (await sha256hex(token)).slice(0, 40);
     await setDoc(doc(col("pushTokens"), id), {
       token, updatedAt: serverTimestamp(), device: navigator.userAgent.slice(0, 150),
@@ -1156,7 +1161,7 @@ function pointsForm(kidId, sign) {
 // ---------- Atualizações ----------
 // Os telemóveis guardam a app em cache; ao abrir (e ao voltar à app) comparamos com version.json
 // e, se houver versão nova, recarregamos os ficheiros. Atualiza APP_VERSION e version.json juntos.
-const APP_VERSION = "2026-10-17.6";
+const APP_VERSION = "2026-10-28.1";
 async function checkForUpdate() {
   try {
     if (!modal.classList.contains("hidden")) return; // não interromper quem está a escrever
